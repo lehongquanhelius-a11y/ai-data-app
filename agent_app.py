@@ -10,7 +10,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 
 # --- THIẾT LẬP TRANG ---
-st.set_page_config(page_title="VERAXUS Data App", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Group 3 TINE313 Data App", layout="wide", initial_sidebar_state="expanded")
 
 # --- MA THUẬT CSS ---
 st.markdown("""
@@ -46,7 +46,7 @@ st.markdown("""
 
 # --- XÂY DỰNG SIDEBAR ---
 with st.sidebar:
-    st.markdown("## 🛡️ VERAXUS")
+    st.markdown("## 🛡️ Group 3 TINE313")
     st.caption("🟢 CSDL Doanh nghiệp - Nội bộ (Local Engine)")
     
     col1, col2 = st.columns(2)
@@ -86,7 +86,7 @@ def setup_database():
 db_path = setup_database()
 
 if not api_key:
-    st.info("👋 Chào mừng đến với VERAXUS! Vui lòng nhập API Key ở thanh menu bên trái để bắt đầu.")
+    st.info("👋 Chào mừng đến với Group 3 TINE313! Vui lòng nhập API Key ở thanh menu bên trái để bắt đầu.")
     st.stop() 
 
 os.environ["GOOGLE_API_KEY"] = api_key
@@ -97,7 +97,7 @@ def get_ai_agent(key):
     db = SQLDatabase.from_uri(f"sqlite:///{db_path}")
     llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
     instructions = """
-    Bạn là hệ thống phân tích dữ liệu chuyên nghiệp tên là VERAXUS.
+    Bạn là hệ thống phân tích dữ liệu chuyên nghiệp tên là Group 3 TINE313.
     Quy tắc:
     1. Chỉ dùng lệnh SELECT.
     2. Nếu được yêu cầu vẽ biểu đồ, BẮT BUỘC trả về Bảng Markdown chứa dữ liệu.
@@ -131,7 +131,7 @@ def draw_chart_from_markdown(answer_text):
                     for col in df_plot.columns[1:]:
                         df_plot[col] = pd.to_numeric(df_plot[col].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                     
-                    st.dataframe(df_plot, use_container_width=True) # In thêm cái bảng dữ liệu thô cho ngầu
+                    st.dataframe(df_plot, use_container_width=True) # In thêm cái bảng dữ liệu thô
                     st.markdown("### 📈 Biểu đồ trực quan")
                     st.bar_chart(df_plot.set_index(df_plot.columns[0]))
                     return True
@@ -158,7 +158,7 @@ for msg in st.session_state.messages:
             with t_sql: st.write("*(Tiến trình xử lý SQL đã được lưu lại trong phiên làm việc)*")
 
 # Xử lý câu hỏi mới
-user_input = st.chat_input("Ask Veraxus...")
+user_input = st.chat_input("Ask Group 3 TINE313...")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
