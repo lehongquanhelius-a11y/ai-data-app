@@ -1,0 +1,5 @@
+streamlit
+pandas
+sqlalchemy
+langchain-community
+langchain-google-genai
