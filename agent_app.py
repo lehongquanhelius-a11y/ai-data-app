@@ -13,16 +13,13 @@ import sqlite3
 # ==========================================
 # 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE
 # ==========================================
-# Ép đường dẫn tuyệt đối để tránh lỗi "no such table"
 DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
 DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
 
 def init_sqlite_db():
-    """Tự động tạo file ecommerce.db và 5 bảng dữ liệu nếu file chưa tồn tại"""
     if not os.path.exists("ecommerce.db"):
         conn = sqlite3.connect("ecommerce.db")
         
-        # Tạo data giả lập
         df_customers = pd.DataFrame({
             'customer_id': ['C1', 'C2', 'C3', 'C4', 'C5'], 
             'customer_city': ['São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'São Paulo', 'Curitiba']
@@ -46,7 +43,6 @@ def init_sqlite_db():
             'price': [150.5, 200.0, 99.9, 350.0, 45.0]
         })
         
-        # Đổ data vào Database
         df_customers.to_sql('df_customers', conn, index=False, if_exists='replace')
         df_orders.to_sql('df_orders', conn, index=False, if_exists='replace')
         df_payments.to_sql('df_payments', conn, index=False, if_exists='replace')
@@ -281,4 +277,6 @@ def get_agent():
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
-    code_blocks = re.findall(r'
+    # 🌟 ĐÃ FIX: Dùng thủ thuật nối chuỗi để trình duyệt không bị nhầm lẫn khi Copy
+    tick3 = '`' * 3
+    code_blocks = re.findall(fr'{tick3}python(.*?){
