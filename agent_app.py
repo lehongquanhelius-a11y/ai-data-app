@@ -10,12 +10,14 @@ import re
 st.set_page_config(page_title="My AI agent", page_icon="🛒", layout="wide")
 st.title("🛒 My AI agent")
 st.markdown("Trợ lý AI phân tích dữ liệu, săn Insight & Hoạch định Chiến lược")
+# Dòng bản quyền cực "ngầu" của nhóm
+st.markdown("🔥 **Đồ án phát triển bởi: Group 3 - TINE313** 🔥")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ==========================================
-# 2. KHU VỰC CẤU HÌNH & SIDEBAR (GIỐNG ẢNH)
+# 2. KHU VỰC CẤU HÌNH & SIDEBAR
 # ==========================================
 with st.sidebar:
     # Hàng nút bấm trên cùng
@@ -125,7 +127,6 @@ def get_agent():
 # ==========================================
 # 5. GIAO DIỆN HIỂN THỊ (THEO ẢNH MẪU)
 # ==========================================
-# Hàm render nội dung tin nhắn để tái sử dụng cho lịch sử và tin nhắn mới
 def render_assistant_response(answer):
     # 1. Bóc tách dữ liệu
     code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
@@ -150,7 +151,7 @@ def render_assistant_response(answer):
             except Exception as e:
                 st.warning(f"Không thể hiển thị biểu đồ: {e}")
 
-    # 3. Render Thanh thông báo AI Kiểm định (Y hệt ảnh)
+    # 3. Render Thanh thông báo AI Kiểm định 
     st.markdown("---")
     st.markdown("💡 **Phát hiện 1 điểm/xu hướng bất thường bởi dữ liệu. Xem chi tiết tại tab 'Insight & Hành động'**")
     st.success("✔️ **Dữ liệu đã được kiểm chứng tính toàn vẹn (Độ tin cậy 100%)** — Nguồn: CSDL Doanh Nghiệp")
