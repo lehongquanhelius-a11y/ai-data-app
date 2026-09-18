@@ -16,14 +16,12 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ==========================================
-# 2. KHU VỰC CẤU HÌNH & SIDEBAR (CÓ BRANDING NHÓM)
+# 2. KHU VỰC CẤU HÌNH & SIDEBAR
 # ==========================================
 with st.sidebar:
-    # Đặt Brand name lên đỉnh cao nhất của thanh trái
     st.markdown("### 🔥 Group 3 - TINE313")
     st.markdown("---")
     
-    # Hàng nút bấm trên cùng
     col1, col2 = st.columns([1, 1])
     with col1:
         if st.button("➕ Chat Mới", type="primary", use_container_width=True):
@@ -42,7 +40,6 @@ with st.sidebar:
 
     st.markdown("---")
     
-    # Danh mục Bảng dữ liệu
     st.markdown("📂 **Danh mục Bảng Dữ liệu**")
     st.caption("Cơ sở dữ liệu gồm 5 danh mục nghiệp vụ:")
     with st.expander("Hiển thị chi tiết bảng"):
@@ -56,7 +53,6 @@ with st.sidebar:
 
     st.markdown("---")
     
-    # Lịch sử hội thoại
     st.markdown("🕒 **Lịch sử Hội thoại**")
     st.caption("Bấm vào câu hỏi để xem lại kết quả tức thì")
     
@@ -114,8 +110,8 @@ def get_agent():
             
         db = SQLDatabase.from_uri(db_uri)
         
-        # Dùng gemini-pro ổn định
-        llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=google_api_key, temperature=0.2)
+        # Trả lại bản gemini-3.6-flash theo đúng thói quen sử dụng mượt mà của sếp
+        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=google_api_key, temperature=0.2)
         
         agent_executor = create_sql_agent(
             llm=llm, 
@@ -125,7 +121,7 @@ def get_agent():
             prefix=instructions, 
             verbose=True, 
             handle_parsing_errors=True,
-            max_iterations=4  # Chống lỗi vượt quá quota API
+            max_iterations=4  # Giới hạn số vòng lặp để né 429
         )
         return agent_executor, "OK"
     except Exception as e:
@@ -136,7 +132,6 @@ def get_agent():
 # ==========================================
 def render_assistant_response(answer):
     code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
-    # Dòng 138 đã được fix hoàn chỉnh
     sql_blocks = re.findall(r'```sql(.*?)```', answer, re.DOTALL)
     
     phan_tich = "Đang cập nhật số liệu..."
