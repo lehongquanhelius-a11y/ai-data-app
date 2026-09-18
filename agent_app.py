@@ -13,13 +13,14 @@ import sqlite3
 # ==========================================
 # 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE
 # ==========================================
-DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
-DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
-
 def init_sqlite_db():
-    if not os.path.exists("ecommerce.db"):
-        conn = sqlite3.connect("ecommerce.db")
-        
+    # Kết nối và kiểm tra xem bảng df_orders đã tồn tại THẬT SỰ bên trong chưa
+    conn = sqlite3.connect("ecommerce.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='df_orders'")
+    
+    # Nếu file rỗng (hoặc chưa có bảng), tiến hành bơm data mẫu
+    if cursor.fetchone()[0] == 0:
         df_customers = pd.DataFrame({
             'customer_id': ['C1', 'C2', 'C3', 'C4', 'C5'], 
             'customer_city': ['São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'São Paulo', 'Curitiba']
@@ -48,7 +49,7 @@ def init_sqlite_db():
         df_payments.to_sql('df_payments', conn, index=False, if_exists='replace')
         df_products.to_sql('df_products', conn, index=False, if_exists='replace')
         df_orderitems.to_sql('df_orderitems', conn, index=False, if_exists='replace')
-        conn.close()
+    conn.close()
 
 init_sqlite_db()
 
@@ -208,8 +209,8 @@ Final Answer:
 -- Dán câu lệnh SQL đã chạy thành công
 '''
 """
-# Thay thế an toàn bằng mã ASCII (chr(96) = dấu nháy ngược)
-instructions = instructions_raw.replace("'''", chr(96) * 3)
+tick3 = chr(96) * 3
+instructions = instructions_raw.replace("'''", tick3)
 
 # ==========================================
 # 4. WORKFLOW KIỂM ĐỊNH & KẾT NỐI DATABASE
@@ -223,7 +224,7 @@ def get_db_uri():
     if host and user and db_name:
         pwd_part = f":{pwd}" if pwd else ""
         return f"mysql+pymysql://{user}{pwd_part}@{host}:3306/{db_name}"
-    return DB_URI_SQLITE
+    return "sqlite:///ecommerce.db"
 
 def run_data_audit(db_uri):
     engine = create_engine(db_uri)
@@ -278,15 +279,18 @@ def get_agent():
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
-    # 🌟 ĐÃ FIX: Dùng mã ASCII (96) nối chuỗi để trình duyệt không cắt xén code khi sếp copy
-    tick3 = chr(96) * 3
-    
     regex_python = tick3 + r'python(.*?)' + tick3
     code_blocks = re.findall(regex_python, answer, re.DOTALL)
     
     regex_sql = tick3 + r'sql(.*?)' + tick3
     raw_sql_blocks = re.findall(regex_sql, answer, re.DOTALL | re.IGNORECASE)
-    sql_blocks = list(dict.fromkeys([s.strip() for s in raw_sql_blocks]))
+    
+    # 🌟 ĐÃ FIX: Lọc bỏ các khối rỗng do AI lỡ tay tạo ra
+    sql_blocks = []
+    for s in raw_sql_blocks:
+        s_clean = s.strip()
+        if s_clean and s_clean not in sql_blocks:
+            sql_blocks.append(s_clean)
     
     phan_tich = "Hệ thống đã phân tích xong nhưng đầu ra bị sai định dạng hiển thị. Vui lòng thử lại."
     chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược. Vui lòng bấm 'Chat Mới' và hỏi lại."
@@ -340,7 +344,8 @@ def render_assistant_response(answer, audit_logs=None):
                         df_preview = pd.read_sql(sql, engine)
                         st.dataframe(df_preview, use_container_width=True)
                     except Exception as e:
-                        st.warning("⚠️ Lệnh SQL hợp lệ nhưng không trả về bảng dữ liệu (có thể do lỗi logic truy vấn).")
+                        # 🌟 ĐÃ FIX: In lỗi thực tế để bắt bệnh nếu SQL sai
+                        st.error(f"⚠️ Lỗi truy xuất CSDL: {e}")
                 else:
                     st.info("💡 Câu lệnh này không phải là lệnh truy vấn bảng (SELECT) nên không có Data Preview.")
         else:
