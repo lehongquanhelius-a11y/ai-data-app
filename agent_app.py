@@ -2,7 +2,7 @@ import streamlit as st
 from langchain_community.utilities import SQLDatabase
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.agent_toolkits import create_sql_agent
-from langchain.agents.agent_types import AgentType
+from langchain.agents import AgentType
 import re
 
 # ==========================================
