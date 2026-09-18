@@ -76,9 +76,16 @@ instructions = """
 # VAI TRÒ
 Bạn là một Giám đốc Vận hành (COO) và Kỹ sư Dữ liệu cấp cao làm việc cho một hệ thống E-commerce Marketplace.
 
+# BẢN ĐỒ CƠ SỞ DỮ LIỆU (TÀI LIỆU DÀNH CHO AI)
+- `df_orders`: Bảng trung tâm. Chứa order_id, customer_id, order_status.
+- `df_customers`: Chứa customer_id, customer_city. (Join với df_orders qua customer_id).
+- `df_payments`: Chứa order_id, payment_value. (Join với df_orders qua order_id).
+- `df_products`: Chứa product_id, product_category_name.
+- `df_orderitems`: Chứa order_id, product_id, price. (Join với df_orders qua order_id, join với df_products qua product_id).
+
 # RÀNG BUỘC QUAN TRỌNG
-1. Quá trình tư duy: TUYỆT ĐỐI tuân thủ định dạng Action/Action Input của hệ thống. KHÔNG xuất kết quả vội vàng ra UI khi chưa truy vấn xong SQL.
-2. Kỹ thuật SQL: Nối bảng bắt buộc dùng df_orders làm cầu nối. Ưu tiên SUM(payment_value) cho doanh thu, loại trừ đơn Cancelled.
+1. Quá trình tư duy: Sử dụng ngay BẢN ĐỒ CSDL ở trên để viết trực tiếp câu lệnh SQL, KHÔNG CẦN lặp lại bước thăm dò cấu trúc bảng để tiết kiệm vòng lặp. 
+2. Kỹ thuật SQL: Nối bảng bắt buộc dùng df_orders làm cầu nối. Ưu tiên SUM(payment_value) cho doanh thu, loại trừ đơn Cancelled. KHÔNG xuất kết quả vội vàng ra UI khi chưa truy vấn xong.
 
 # ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (Chỉ áp dụng ở bước Trả lời cuối cùng - Final Answer):
 Để hệ thống render UI, bạn BẮT BUỘC xuất kết quả theo cấu trúc sau. TUYỆT ĐỐI không được thiếu các thẻ này:
@@ -121,7 +128,7 @@ def get_agent():
             prefix=instructions, 
             verbose=True, 
             handle_parsing_errors=True,
-            max_iterations=8 
+            max_iterations=15  # Đã tăng lên 15 vòng + thêm Bản đồ CSDL, đảm bảo không bao giờ đứt gánh
         )
         return agent_executor, "OK"
     except Exception as e:
@@ -141,7 +148,7 @@ def render_assistant_response(answer):
         phan_tich_raw = answer.split("[PHÂN TÍCH]")[1]
         phan_tich = phan_tich_raw.split("[")[0].strip()
     elif "Agent stopped due to iteration limit" in answer:
-        phan_tich = "⚠️ AI đã dừng phân tích giữa chừng vì câu hỏi quá phức tạp cần nhiều hơn 8 vòng xử lý. Vui lòng chia nhỏ câu hỏi."
+        phan_tich = "⚠️ AI đã dừng phân tích giữa chừng vì câu hỏi quá phức tạp cần nhiều vòng xử lý. Vui lòng thử lại."
         
     if "[CHIẾN LƯỢC]" in answer:
         chien_luoc_raw = answer.split("[CHIẾN LƯỢC]")[1]
