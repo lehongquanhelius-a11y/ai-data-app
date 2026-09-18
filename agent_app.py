@@ -15,12 +15,10 @@ import uuid
 HISTORY_FILE = "chat_history.json"
 
 def load_history():
-    """Tải lịch sử chat. Hỗ trợ chuyển đổi nếu đang xài bản cũ (dạng List) sang bản mới (dạng Dict)"""
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Nếu file cũ là dạng List, tự động bọc nó vào một session mới để không bị lỗi
                 if isinstance(data, list):
                     if len(data) > 0:
                         return {str(uuid.uuid4()): data}
@@ -31,12 +29,10 @@ def load_history():
     return {}
 
 def save_history(all_chats):
-    """Lưu toàn bộ các phiên chat vào file"""
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(all_chats, f, ensure_ascii=False, indent=4)
 
 def clear_all_history():
-    """Xóa trắng toàn bộ dữ liệu"""
     if os.path.exists(HISTORY_FILE):
         os.remove(HISTORY_FILE)
     st.session_state.all_chats = {}
@@ -51,12 +47,10 @@ st.title("🛒 My AI agent")
 st.markdown("Trợ lý AI phân tích dữ liệu, săn Insight & Hoạch định Chiến lược")
 st.markdown("🔥 **Đồ án phát triển bởi: Group 3 - TINE313** 🔥")
 
-# Khởi tạo dữ liệu Multi-session
 if "all_chats" not in st.session_state:
     st.session_state.all_chats = load_history()
 
 if "current_session_id" not in st.session_state:
-    # Nếu có lịch sử, chọn cái cuối cùng làm phiên hiện tại. Nếu không, tạo mới.
     if st.session_state.all_chats:
         st.session_state.current_session_id = list(st.session_state.all_chats.keys())[-1]
     else:
@@ -65,7 +59,7 @@ if "current_session_id" not in st.session_state:
         st.session_state.all_chats[new_id] = []
 
 # ==========================================
-# 2. KHU VỰC CẤU HÌNH & SIDEBAR (CÓ CHUYỂN TAB CHAT)
+# 2. KHU VỰC CẤU HÌNH & SIDEBAR
 # ==========================================
 with st.sidebar:
     st.markdown("### 🔥 Group 3 - TINE313")
@@ -73,7 +67,6 @@ with st.sidebar:
     
     col1, col2 = st.columns([1, 1])
     with col1:
-        # Bấm Chat Mới -> Tạo ID mới -> Lưu vào danh sách -> Làm mới màn hình
         if st.button("➕ Chat Mới", type="primary", use_container_width=True):
             new_id = str(uuid.uuid4())
             st.session_state.current_session_id = new_id
@@ -103,22 +96,18 @@ with st.sidebar:
     st.markdown("🕒 **Lịch sử Hội thoại**")
     
     has_history = False
-    # Duyệt ngược danh sách để các đoạn chat mới nhất lên đầu (như Gemini)
     for session_id, chat_messages in reversed(st.session_state.all_chats.items()):
         if len(chat_messages) > 0:
             has_history = True
-            # Lấy câu hỏi đầu tiên làm Tiêu đề cho nút bấm
             title = "Tin nhắn mới..."
             for m in chat_messages:
                 if m["role"] == "user":
                     title = m["content"][:22] + "..."
                     break
             
-            # Đổi icon để báo hiệu phiên chat nào đang được mở
             is_active = (session_id == st.session_state.current_session_id)
             btn_label = f"👉 {title}" if is_active else f"💬 {title}"
             
-            # Nếu người dùng bấm vào lịch sử -> Đổi Session ID hiện tại -> Render lại màn hình
             if st.button(btn_label, key=f"hist_{session_id}", use_container_width=True):
                 st.session_state.current_session_id = session_id
                 st.rerun()
@@ -177,8 +166,14 @@ Final Answer:
 instructions = instructions_raw.replace("'''", "```")
 
 # ==========================================
-# 4. WORKFLOW KIỂM ĐỊNH DỮ LIỆU (DATA AUDIT - CODE CỨNG)
+# 4. WORKFLOW KIỂM ĐỊNH & KẾT NỐI DATABASE
 # ==========================================
+def get_db_uri():
+    if mysql_host and mysql_user and mysql_db:
+        pwd_part = f":{mysql_pass}" if mysql_pass else ""
+        return f"mysql+pymysql://{mysql_user}{pwd_part}@{mysql_host}:3306/{mysql_db}"
+    return "sqlite:///ecommerce.db"
+
 def run_data_audit(db_uri):
     engine = create_engine(db_uri)
     audit_logs = []
@@ -203,12 +198,6 @@ def run_data_audit(db_uri):
 # ==========================================
 # 5. KHỞI TẠO TÁC NHÂN
 # ==========================================
-def get_db_uri():
-    if mysql_host and mysql_user and mysql_db:
-        pwd_part = f":{mysql_pass}" if mysql_pass else ""
-        return f"mysql+pymysql://{mysql_user}{pwd_part}@{mysql_host}:3306/{mysql_db}"
-    return "sqlite:///ecommerce.db"
-
 def get_agent():
     if not google_api_key:
         return None, "Vui lòng nhập API Key trong mục Cấu hình."
@@ -258,6 +247,9 @@ def render_assistant_response(answer, audit_logs=None):
 
     st.markdown("---")
     
+    # 🌟 SỬA ĐIỂM SỐ 1: Sửa câu cứng nhắc thành thông báo trung lập, chuyên nghiệp
+    st.markdown("💡 **Hệ thống AI đã bóc tách thành công các Insight chuyên sâu từ CSDL. Xem chi tiết tại các tab bên dưới.**")
+    
     if audit_logs:
         with st.expander("🔍 Biên bản Kiểm định Dữ liệu (Auto-Audit Workflow)", expanded=False):
             for log in audit_logs:
@@ -283,6 +275,17 @@ def render_assistant_response(answer, audit_logs=None):
             st.markdown("**Câu lệnh SQL đã được Agent thực thi:**")
             for sql in sql_blocks:
                 st.code(sql, language="sql")
+                
+                # 🌟 SỬA ĐIỂM SỐ 2: Tự động chạy SQL và vẽ bảng kết quả như MySQL Workbench
+                st.markdown("**🗄️ Bảng kết quả truy xuất (Data Preview):**")
+                try:
+                    engine = create_engine(get_db_uri())
+                    # Chạy câu lệnh SQL để lấy data table
+                    df_preview = pd.read_sql(sql.strip(), engine)
+                    # Hiển thị bảng Dataframe rất đẹp bằng Streamlit
+                    st.dataframe(df_preview, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Không thể hiển thị bảng trước (Preview): {e}")
         else:
             st.info("Agent đã sử dụng dữ liệu ngữ cảnh hoặc tiến trình bị ngắt.")
 
@@ -298,7 +301,6 @@ for msg in current_messages:
             render_assistant_response(msg["content"])
 
 if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm..."):
-    # Thêm câu hỏi vào phiên hiện tại & LƯU LẠI
     st.session_state.all_chats[st.session_state.current_session_id].append({"role": "user", "content": prompt})
     save_history(st.session_state.all_chats)
     
@@ -321,7 +323,6 @@ if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm..."):
                     
                     render_assistant_response(answer, current_audit)
                     
-                    # Thêm câu trả lời vào phiên & LƯU LẠI
                     st.session_state.all_chats[st.session_state.current_session_id].append({"role": "assistant", "content": answer})
                     save_history(st.session_state.all_chats)
                     
