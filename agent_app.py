@@ -1,197 +1,166 @@
 import streamlit as st
-import pandas as pd
-import sqlite3
-import os
-import io
-from sqlalchemy import create_engine
 from langchain_community.utilities import SQLDatabase
-from langchain_community.agent_toolkits import create_sql_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
+from langchain_community.agent_toolkits import create_sql_agent
+from langchain.agents.agent_types import AgentType
+import re
 
-# --- THIẾT LẬP TRANG ---
-st.set_page_config(page_title="Group 3 TINE313 Data App", layout="wide", initial_sidebar_state="expanded")
+# ==========================================
+# 1. CẤU HÌNH GIAO DIỆN STREAMLIT (UI/UX)
+# ==========================================
+st.set_page_config(page_title="E-Commerce AI Agent", page_icon="🛒", layout="wide")
+st.title("🛒 E-Commerce Supply Chain AI Agent")
+st.markdown("Trợ lý AI phân tích dữ liệu, săn Insight & Hoạch định Chiến lược")
 
-# --- MA THUẬT CSS ---
-st.markdown("""
-<style>
-    .stApp { background-color: #F8F9FA; }
-    [data-testid="stChatMessage"] {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 12px;
-        padding: 15px 20px;
-        box-shadow: 0px 4px 6px -1px rgba(0, 0, 0, 0.05);
-        margin-bottom: 15px;
-    }
-    .stButton button { border-radius: 8px; font-weight: 600; }
-    hr { margin-top: 0.5em; margin-bottom: 0.5em; }
-    
-    /* Chỉnh 3 cái Tabs cho đẹp và cách điệu */
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #F8F9FA;
-        border-radius: 6px 6px 0px 0px;
-        padding: 10px 20px;
-        border: 1px solid #E2E8F0;
-        border-bottom: none;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #FFFFFF;
-        border-bottom: 2px solid #0068C9;
-        font-weight: bold;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# --- XÂY DỰNG SIDEBAR ---
-with st.sidebar:
-    st.markdown("## 🛡️ Group 3 TINE313")
-    st.caption("🟢 CSDL Doanh nghiệp - Nội bộ (Local Engine)")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("✨ Chat Mới", type="primary", use_container_width=True):
-            st.session_state.messages = []
-            st.rerun()
-    with col2:
-        st.button("⚙️ Cấu hình", use_container_width=True)
-    
-    st.divider()
-    with st.expander("🗄️ Danh mục Bảng Dữ liệu", expanded=True):
-        st.caption("Cơ sở dữ liệu gồm 5 danh mục nghiệp vụ")
-        st.selectbox("Chọn bảng:", ["customers", "orders", "order_items", "payments", "products"])
-        
-    st.divider()
-    with st.expander("🔑 Quản lý API Key", expanded=True):
-        api_key = st.text_input("Nhập Gemini API Key:", type="password")
-        st.markdown("[Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
-
-# --- KHỞI TẠO CƠ SỞ DỮ LIỆU ---
-@st.cache_resource
-def setup_database():
-    db_file = "ecommerce.db"
-    engine = create_engine(f"sqlite:///{db_file}")
-    if not os.path.exists(db_file):
-        try:
-            pd.read_csv("df_Customers.csv").to_sql("customers", engine, index=False, if_exists="replace")
-            pd.read_csv("df_OrderItems.csv").to_sql("order_items", engine, index=False, if_exists="replace")
-            pd.read_csv("df_Orders.csv").to_sql("orders", engine, index=False, if_exists="replace")
-            pd.read_csv("df_Payments.csv").to_sql("payments", engine, index=False, if_exists="replace")
-            pd.read_csv("df_Products.csv").to_sql("products", engine, index=False, if_exists="replace")
-        except:
-            pass 
-    return db_file
-
-db_path = setup_database()
-
-if not api_key:
-    st.info("👋 Chào mừng đến với Group 3 TINE313! Vui lòng nhập API Key ở thanh menu bên trái để bắt đầu.")
-    st.stop() 
-
-os.environ["GOOGLE_API_KEY"] = api_key
-
-# --- CẤU HÌNH AI AGENT ---
-@st.cache_resource
-def get_ai_agent(key):
-    db = SQLDatabase.from_uri(f"sqlite:///{db_path}")
-    llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
-    instructions = """
-    Bạn là hệ thống phân tích dữ liệu chuyên nghiệp tên là Group 3 TINE313.
-    Quy tắc:
-    1. Chỉ dùng lệnh SELECT.
-    2. Nếu được yêu cầu vẽ biểu đồ, BẮT BUỘC trả về Bảng Markdown chứa dữ liệu.
-    3. Cấu trúc câu trả lời của bạn BẮT BUỘC phải theo đúng Format chuyên nghiệp sau:
-       **📊 1. Số liệu Thực tế** (Đưa ra con số)
-       **🔍 2. Giả thuyết & Nguyên nhân Tiềm năng** (Đánh giá sâu sắc)
-       **🎯 3. Đề xuất Chiến lược Phân cấp** 
-       - 🔴 [Cấp Bách - 0-30 Ngày]: Hành động ngay.
-       - 🟡 [Trung Hạn - 1-3 Quý]: Tối ưu hóa.
-       - 🟢 [Dài Hạn - 1-3 Năm]: Chiến lược bền vững.
-    4. Bắt buộc bắt đầu bằng "Final Answer: "
-    """
-    agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", verbose=True, handle_parsing_errors=True)
-    return agent_executor, instructions
-
-agent, instructions = get_ai_agent(api_key)
-
-# --- HÀM HỖ TRỢ VẼ BIỂU ĐỒ TỪ MARKDOWN ---
-def draw_chart_from_markdown(answer_text):
-    if "|" in answer_text and "-|-" in answer_text:
-        try:
-            lines = [line.strip() for line in answer_text.split('\n') if '|' in line]
-            if len(lines) > 2:
-                csv_data = '\n'.join(lines)
-                df_plot = pd.read_csv(io.StringIO(csv_data), sep='\|', engine='python').dropna(axis=1, how='all')
-                df_plot.columns = df_plot.columns.str.strip()
-                df_plot = df_plot.loc[:, ~df_plot.columns.str.contains('^Unnamed')]
-                
-                if len(df_plot.columns) >= 2:
-                    df_plot.iloc[:, 0] = df_plot.iloc[:, 0].astype(str).str.strip()
-                    for col in df_plot.columns[1:]:
-                        df_plot[col] = pd.to_numeric(df_plot[col].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
-                    
-                    st.dataframe(df_plot, use_container_width=True) # In thêm cái bảng dữ liệu thô
-                    st.markdown("### 📈 Biểu đồ trực quan")
-                    st.bar_chart(df_plot.set_index(df_plot.columns[0]))
-                    return True
-        except:
-            pass
-    return False
-
-# --- KHU VỰC CHAT CHÍNH ---
+# Khởi tạo bộ nhớ Lịch sử Chat (Session State)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Trình bày lại lịch sử hội thoại
+# ==========================================
+# 2. KHU VỰC CẤU HÌNH (SIDEBAR & EXPANDERS)
+# ==========================================
+with st.sidebar:
+    # Bọc toàn bộ ô nhập liệu vào trong 1 cái Expander có thể click
+    with st.expander("⚙️ Cấu hình Hệ thống (Click để mở/đóng)", expanded=True):
+        google_api_key = st.text_input("Google Gemini API Key:", type="password")
+        
+        st.markdown("---")
+        st.write("🔌 **KẾT NỐI DATABASE**")
+        st.caption("Nếu để trống, hệ thống tự dùng bản Offline (SQLite)")
+        mysql_host = st.text_input("Host (VD: localhost):", value="")
+        mysql_user = st.text_input("Username:", value="")
+        mysql_pass = st.text_input("Password:", type="password")
+        mysql_db = st.text_input("Tên Database:", value="")
+    
+    st.markdown("---")
+    if st.button("🗑️ Xóa lịch sử trò chuyện"):
+        st.session_state.messages = []
+        st.rerun()
+
+# Sách Hướng Dẫn Dữ Liệu
+with st.expander("📖 Xem cấu trúc Dữ liệu (ERD & Từ điển) - Click để mở"):
+    st.markdown("""
+    - **df_customers:** `customer_id` (PK), `customer_zip_code_prefix`, `customer_city`, `customer_state`.
+    - **df_orders:** `order_id` (PK), `customer_id` (FK), `order_purchase_timestamp`, `order_approved_at`, `order_delivered_timestamp`, `order_estimated_delivery_date`.
+    - **df_orderitems:** `order_id` (PK/FK), `product_id` (PK/FK), `seller_id`, `price` (giá SP), `shipping_charges` (phí ship).
+    - **df_products:** `product_id` (PK), `product_category_name`, `product_weight_g`, `product_length_cm`, v.v.
+    - **df_payments:** `order_id` (PK/FK), `payment_sequential`, `payment_type`, `payment_installments`, `payment_value`.
+    *Chú ý: Đơn hàng kết nối với Sản phẩm và Thanh toán thông qua bảng trung tâm `df_orders`.*
+    """)
+
+# ==========================================
+# 3. BỘ NÃO CHIẾN LƯỢC (SYSTEM PROMPT)
+# ==========================================
+instructions = """
+# VAI TRÒ
+Bạn là một Giám đốc Vận hành (COO) và Kỹ sư Dữ liệu cấp cao làm việc cho một hệ thống E-commerce Marketplace. Nhiệm vụ của bạn là viết truy vấn SQL chính xác, tìm Insight nghịch lý và Đề xuất chiến lược thực chiến.
+
+# BỐI CẢNH & LUỒNG VẬN HÀNH (8 BƯỚC)
+- Mô hình: Marketplace trung gian, không tự sản xuất.
+- Luồng: (1) Đặt hàng -> (2) Check tồn kho -> (3) Tạo đơn -> (4) Xử lý ngoại lệ -> (5) Hủy/Hoàn tiền -> (6) Đóng gói tại kho -> (7) Bàn giao 3PL -> (8) Phân tích.
+
+# TỪ ĐIỂN DỮ LIỆU & RÀNG BUỘC (GUARDRAILS)
+1. Cú pháp: Hệ thống sử dụng SQL chuẩn. Nếu trường thời gian là chuỗi, hãy dùng hàm chuyển đổi phù hợp.
+2. Nối bảng: Bắt buộc dùng df_orders làm cầu nối, tuyệt đối không JOIN trực tiếp df_customers với df_products/payments.
+3. Doanh thu: Ưu tiên SUM(payment_value). Loại trừ các đơn Cancelled hoặc Failed_Delivery khi tính doanh thu kinh doanh. Tuyệt đối không dùng SUM/AVG lên zipcode.
+
+# TƯ DUY PHÂN TÍCH ĐỘT PHÁ (SĂN NGHỊCH LÝ)
+Khung phân tích 3 trụ cột: (1) Trải nghiệm KH; (2) Hiệu suất Sản phẩm; (3) Tài chính dòng tiền.
+Bạn BẮT BUỘC phải tìm các "Nghịch lý" (Counter-intuitive Insights) và trình bày theo 3 bước:
+- Logic thường: "Thông thường..."
+- Sự thật từ Data: "Tuy nhiên, dữ liệu thực tế..."
+- Nguyên nhân: "Giả thuyết cốt lõi là..."
+
+# ĐỀ XUẤT CHIẾN LƯỢC KINH DOANH (THỰC CHIẾN, KHÔNG ẢO GIÁC)
+Dựa trên Insight, BẮT BUỘC đề xuất giải pháp THỰC TẾ, CỤ THỂ gắn liền với Data vừa tìm được (Ví dụ: Không nói "Tối ưu phí ship", mà phải nói "Đàm phán lại phí 3PL cho mặt hàng nội thất trên 10kg tại bang NY"). Phân loại chặt chẽ theo 3 mốc thời gian:
+1. Chiến lược Cấp bách (Ngay lập tức/1-3 tháng): Hành động dập lửa, vá lỗ hổng doanh thu, xử lý các seller/danh mục đang gây thiệt hại trực tiếp.
+2. Chiến lược Trung hạn (3-6 tháng): Tối ưu quy trình, dòng tiền (VD: Sửa đổi chính sách trả góp, tái phân bổ kho bãi địa phương).
+3. Chiến lược Dài hạn (6-12 tháng): Chuyển dịch mô hình, đầu tư hạ tầng mở rộng, hoặc phát triển công nghệ dự báo.
+
+# QUY TẮC TRỰC QUAN HÓA
+Nếu yêu cầu vẽ biểu đồ, xuất mã Python dùng `streamlit`, `pandas`, `matplotlib`/`seaborn`.
+- Line chart cho xu hướng. Bar chart cho so sánh. Pie/Stacked bar cho tỷ trọng. Scatter cho tương quan.
+"""
+
+# ==========================================
+# 4. KHỞI TẠO KẾT NỐI (CÓ CƠ CHẾ DỰ PHÒNG) & AGENT
+# ==========================================
+def get_agent():
+    if not google_api_key:
+        return None, "Vui lòng nhập Google Gemini API Key bên thanh cấu hình."
+    
+    try:
+        # Cơ chế ưu tiên: Nếu nhập đủ thông tin MySQL thì dùng MySQL
+        if mysql_host and mysql_user and mysql_db:
+            pwd_part = f":{mysql_pass}" if mysql_pass else ""
+            db_uri = f"mysql+pymysql://{mysql_user}{pwd_part}@{mysql_host}:3306/{mysql_db}"
+            st.sidebar.success("Đang kết nối: MySQL Server")
+        else:
+            # Fallback: Nếu không nhập MySQL, tự động dùng SQLite nội bộ
+            db_uri = "sqlite:///ecommerce.db"
+            st.sidebar.info("Đang kết nối: SQLite Local (Dự phòng)")
+            
+        db = SQLDatabase.from_uri(db_uri)
+        
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-pro",
+            google_api_key=google_api_key,
+            temperature=0.2 
+        )
+        
+        agent_executor = create_sql_agent(
+            llm=llm,
+            toolkit=None,
+            db=db,
+            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            prefix=instructions,
+            verbose=True,
+            handle_parsing_errors=True
+        )
+        return agent_executor, "OK"
+    except Exception as e:
+        return None, f"Lỗi kết nối cơ sở dữ liệu: {e}"
+
+# ==========================================
+# 5. GIAO DIỆN TRÒ CHUYỆN (CHAT INTERFACE)
+# ==========================================
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        if msg["role"] == "user":
-            st.write(msg["content"])
-        else:
-            st.caption("✅ **Dữ liệu đã được kiểm chứng tính toàn vẹn (Độ tin cậy 100%)** - Nguồn: CSDL Doanh nghiệp")
-            t_data, t_insight, t_sql = st.tabs(["📊 Bảng số liệu & Biểu đồ", "💡 Insight & Hành động", "⚙️ Tiến trình Tư duy & SQL"])
-            with t_insight: st.write(msg["content"])
-            with t_data:
-                if not draw_chart_from_markdown(msg["content"]):
-                    st.info("📝 Không có dữ liệu dạng bảng cho câu hỏi này.")
-            with t_sql: st.write("*(Tiến trình xử lý SQL đã được lưu lại trong phiên làm việc)*")
+        st.markdown(msg["content"])
+        if msg["role"] == "assistant" and "```python" in msg["content"]:
+            code_blocks = re.findall(r'```python(.*?)```', msg["content"], re.DOTALL)
+            for code in code_blocks:
+                try:
+                    exec(code)
+                except Exception:
+                    pass
 
-# Xử lý câu hỏi mới
-user_input = st.chat_input("Ask Group 3 TINE313...")
-
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
+if prompt := st.chat_input("VD: Phân tích nghịch lý giao hàng và đề xuất chiến lược 3 giai đoạn..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.write(user_input)
+        st.markdown(prompt)
+
+    agent, status = get_agent()
     
     with st.chat_message("assistant"):
-        st.caption("✅ **Dữ liệu đã được kiểm chứng tính toàn vẹn (Độ tin cậy 100%)** - Nguồn: CSDL Doanh nghiệp")
-        
-        # Tạo 3 Tabs giống hệt trong ảnh
-        tab_data, tab_insight, tab_sql = st.tabs(["📊 Bảng số liệu & Biểu đồ", "💡 Insight & Hành động", "⚙️ Tiến trình Tư duy & SQL"])
-        
-        # 1. Cho con AI suy nghĩ và chạy lệnh SQL BÊN TRONG Tab 3
-        with tab_sql:
-            st_callback = StreamlitCallbackHandler(st.container(), expand_new_thoughts=True)
-            try:
-                response = agent.invoke(
-                    {"input": f"{instructions}\n\nCâu hỏi: {user_input}"},
-                    {"callbacks": [st_callback]}
-                )
-                display_answer = response["output"].replace("Final Answer:", "").strip()
-            except Exception as e:
-                display_answer = f"Đã xảy ra lỗi: {str(e)}"
-                st.error(display_answer)
-        
-        # 2. In phần phân tích chiến lược vào Tab 2
-        with tab_insight:
-            st.write(display_answer)
-        
-        # 3. Lọc bảng vẽ biểu đồ đẩy vào Tab 1
-        with tab_data:
-            if not draw_chart_from_markdown(display_answer):
-                st.info("📝 Không có dữ liệu dạng bảng. Vui lòng xem phân tích tại tab 'Insight & Hành động'.")
-        
-        # Lưu kết quả
-        st.session_state.messages.append({"role": "assistant", "content": display_answer})
+        if agent is None:
+            st.error(status)
+        else:
+            with st.spinner("Đang truy xuất Database, tìm nghịch lý và lên chiến lược..."):
+                try:
+                    response = agent.invoke({"input": prompt})
+                    answer = response["output"]
+                    
+                    st.markdown(answer)
+                    
+                    code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
+                    for code in code_blocks:
+                        try:
+                            exec(code)
+                        except Exception as code_error:
+                            st.error(f"Lỗi khi vẽ biểu đồ: {code_error}")
+                            
+                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                    
+                except Exception as e:
+                    st.error(f"Đã có lỗi xảy ra: {e}")
