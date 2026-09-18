@@ -11,7 +11,7 @@ import uuid
 import sqlite3
 
 # ==========================================
-# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE (ÉP ĐỌC CSV THẬT)
+# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE (ĐỌC CSV BẤT TỬ)
 # ==========================================
 DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
 DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
@@ -27,23 +27,22 @@ def init_sqlite_db():
     
     needs_update = True
     if has_table:
-        # Nếu có bảng, đếm xem có bao nhiêu dòng
         cursor.execute("SELECT COUNT(*) FROM df_orders")
         row_count = cursor.fetchone()[0]
-        # Nếu đã có hơn 100 dòng tức là data thật đã được nạp, không cần update
         if row_count > 100:
             needs_update = False
             
-    # Lệnh Hủy Diệt: Nếu DB trống hoặc chỉ có 5 dòng giả, ép đọc lại 5 file CSV
     if needs_update:
         try:
-            df_customers = pd.read_csv("df_Customers.csv")
-            df_orders = pd.read_csv("df_Orders.csv")
-            df_payments = pd.read_csv("df_Payments.csv")
-            df_products = pd.read_csv("df_Products.csv")
-            df_orderitems = pd.read_csv("df_OrderItems.csv")
+            # BỌC THÉP CSV: Tự nhận diện dấy phẩy/chấm phẩy (sep=None), lờ đi dòng lỗi (on_bad_lines='skip')
+            read_opts = {'sep': None, 'engine': 'python', 'on_bad_lines': 'skip', 'encoding': 'utf-8'}
             
-            # Đổ toàn bộ 89.000+ dòng đè lên SQLite
+            df_customers = pd.read_csv("df_Customers.csv", **read_opts)
+            df_orders = pd.read_csv("df_Orders.csv", **read_opts)
+            df_payments = pd.read_csv("df_Payments.csv", **read_opts)
+            df_products = pd.read_csv("df_Products.csv", **read_opts)
+            df_orderitems = pd.read_csv("df_OrderItems.csv", **read_opts)
+            
             df_customers.to_sql('df_customers', conn, index=False, if_exists='replace')
             df_orders.to_sql('df_orders', conn, index=False, if_exists='replace')
             df_payments.to_sql('df_payments', conn, index=False, if_exists='replace')
@@ -213,7 +212,6 @@ Final Answer:
 -- Dán câu lệnh SQL đã chạy thành công
 '''
 """
-# Bảo kê chống rách code khi Copy bằng ASCII 96 (dấu nháy ngược)
 tick3 = chr(96) * 3
 instructions = instructions_raw.replace("'''", tick3)
 
