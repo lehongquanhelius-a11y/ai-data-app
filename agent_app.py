@@ -3,6 +3,8 @@ from langchain_community.utilities import SQLDatabase
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.agent_toolkits import create_sql_agent
 import re
+import pandas as pd
+from sqlalchemy import create_engine
 
 # ==========================================
 # 1. CẤU HÌNH GIAO DIỆN STREAMLIT
@@ -30,7 +32,6 @@ with st.sidebar:
     with col2:
         with st.popover("⚙️ Cấu hình"):
             google_api_key = st.text_input("Gemini API Key:", type="password")
-            st.markdown("[👉 Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
             
             st.markdown("---")
             mysql_host = st.text_input("MySQL Host:", value="")
@@ -39,9 +40,7 @@ with st.sidebar:
             mysql_db = st.text_input("Database:", value="")
 
     st.markdown("---")
-    
     st.markdown("📂 **Danh mục Bảng Dữ liệu**")
-    st.caption("Cơ sở dữ liệu gồm 5 danh mục nghiệp vụ:")
     with st.expander("Hiển thị chi tiết bảng"):
         st.markdown("""
         - **df_customers** (Khách hàng)
@@ -52,19 +51,6 @@ with st.sidebar:
         """)
 
     st.markdown("---")
-    
-    st.markdown("🕒 **Lịch sử Hội thoại**")
-    st.caption("Bấm vào câu hỏi để xem lại kết quả tức thì")
-    
-    has_history = False
-    for i, msg in enumerate(st.session_state.messages):
-        if msg["role"] == "user":
-            has_history = True
-            st.button(f"💬 {msg['content'][:30]}...", key=f"hist_{i}", use_container_width=True)
-            
-    if not has_history:
-        st.info("Chưa có lịch sử trò chuyện.")
-        
     if st.button("🗑️ Dọn dẹp lịch sử", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -72,7 +58,6 @@ with st.sidebar:
 # ==========================================
 # 3. BỘ NÃO CHIẾN LƯỢC & ÉP KHUÔN ĐẦU RA 
 # ==========================================
-# Dùng mẹo ''' thay vì 3 dấu nháy ngược để tránh lỗi đứt đoạn UI khi copy code
 instructions_raw = """
 # VAI TRÒ
 Bạn là Giám đốc Vận hành (COO) & Kỹ sư Dữ liệu cấp cao tại một E-commerce Marketplace.
@@ -104,31 +89,60 @@ Final Answer:
 2. Insight nghịch lý/chuyên sâu: Phát hiện điểm bất thường, rủi ro ngầm, hoặc cơ hội ẩn giấu đằng sau những con số đó.)
 
 [CHIẾN LƯỢC]
-(Đề xuất chiến lược hành động dựa trên cả 2 Insight vừa nêu)
+(BẮT BUỘC trình bày bằng Bullet Points, chia thành 3 mục rõ ràng dựa trên insight:
+* Chiến lược Ngắn hạn (Cấp bách): ...
+* Chiến lược Trung hạn: ...
+* Chiến lược Dài hạn: ...)
 
 [SQL]
 '''sql
 -- Dán câu lệnh SQL đã chạy thành công
 '''
 """
-# Tự động chuyển đổi lại thành 3 dấu nháy ngược cho LangChain hiểu
 instructions = instructions_raw.replace("'''", "```")
 
 # ==========================================
-# 4. KHỞI TẠO TÁC NHÂN
+# 4. WORKFLOW KIỂM ĐỊNH DỮ LIỆU (DATA AUDIT)
 # ==========================================
+def run_data_audit(db_uri):
+    """Quét Database thực tế để tìm lỗi logic/rác dữ liệu trước khi AI phân tích"""
+    engine = create_engine(db_uri)
+    audit_logs = []
+    try:
+        # Kiểm tra doanh thu âm
+        df_pay = pd.read_sql("SELECT order_id, payment_value FROM df_payments WHERE payment_value < 0", engine)
+        if not df_pay.empty:
+            audit_logs.append({"status": "error", "msg": f"❌ df_payments: Phát hiện {len(df_pay)} giao dịch có giá trị âm (Lỗi hệ thống ghi nhận)."})
+        else:
+            audit_logs.append({"status": "success", "msg": "✅ df_payments: 100% giao dịch có giá trị dương hợp lệ."})
+            
+        # Kiểm tra đơn hàng thiếu trạng thái
+        df_ord = pd.read_sql("SELECT order_id FROM df_orders WHERE order_status IS NULL OR order_status = ''", engine)
+        if not df_ord.empty:
+            audit_logs.append({"status": "warning", "msg": f"⚠️ df_orders: Phát hiện {len(df_ord)} đơn hàng bị trống (Null) trạng thái."})
+        else:
+            audit_logs.append({"status": "success", "msg": "✅ df_orders: Toàn vẹn dữ liệu trạng thái đơn hàng."})
+            
+    except Exception as e:
+        audit_logs.append({"status": "warning", "msg": f"⚠️ Bỏ qua kiểm định sâu do CSDL chưa khởi tạo đầy đủ: {str(e)[:50]}..."})
+        
+    return audit_logs
+
+# ==========================================
+# 5. KHỞI TẠO TÁC NHÂN
+# ==========================================
+def get_db_uri():
+    if mysql_host and mysql_user and mysql_db:
+        pwd_part = f":{mysql_pass}" if mysql_pass else ""
+        return f"mysql+pymysql://{mysql_user}{pwd_part}@{mysql_host}:3306/{mysql_db}"
+    return "sqlite:///ecommerce.db"
+
 def get_agent():
     if not google_api_key:
         return None, "Vui lòng nhập API Key trong mục Cấu hình."
     try:
-        if mysql_host and mysql_user and mysql_db:
-            pwd_part = f":{mysql_pass}" if mysql_pass else ""
-            db_uri = f"mysql+pymysql://{mysql_user}{pwd_part}@{mysql_host}:3306/{mysql_db}"
-        else:
-            db_uri = "sqlite:///ecommerce.db"
-            
+        db_uri = get_db_uri()
         db = SQLDatabase.from_uri(db_uri)
-        
         llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=google_api_key, temperature=0.1)
         
         agent_executor = create_sql_agent(
@@ -146,9 +160,9 @@ def get_agent():
         return None, str(e)
 
 # ==========================================
-# 5. GIAO DIỆN HIỂN THỊ
+# 6. GIAO DIỆN HIỂN THỊ
 # ==========================================
-def render_assistant_response(answer):
+def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
     code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
@@ -158,12 +172,10 @@ def render_assistant_response(answer):
     chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược. Vui lòng bấm 'Chat Mới' và hỏi lại."
     
     if "[PHÂN TÍCH]" in answer:
-        phan_tich_raw = answer.split("[PHÂN TÍCH]")[1]
-        phan_tich = phan_tich_raw.split("[")[0].strip()
+        phan_tich = answer.split("[PHÂN TÍCH]")[1].split("[")[0].strip()
         
     if "[CHIẾN LƯỢC]" in answer:
-        chien_luoc_raw = answer.split("[CHIẾN LƯỢC]")[1]
-        chien_luoc = chien_luoc_raw.split("[")[0].strip()
+        chien_luoc = answer.split("[CHIẾN LƯỢC]")[1].split("[")[0].strip()
 
     if code_blocks:
         combined_code = "\n".join(code_blocks)
@@ -173,16 +185,24 @@ def render_assistant_response(answer):
             st.warning(f"Không thể hiển thị biểu đồ: {e}")
 
     st.markdown("---")
-    st.markdown("💡 **Phát hiện 1 điểm/xu hướng bất thường bởi dữ liệu. Xem chi tiết tại tab 'Insight & Hành động'**")
-    st.success("✔️ **Dữ liệu đã được kiểm chứng tính toàn vẹn (Độ tin cậy 100%)** — Nguồn: CSDL Doanh Nghiệp")
+    
+    # Hiển thị Biên bản Kiểm định thực tế nếu có
+    if audit_logs:
+        with st.expander("🔍 Biên bản Kiểm định Dữ liệu (Auto-Audit Workflow)", expanded=False):
+            for log in audit_logs:
+                if log["status"] == "error":
+                    st.error(log["msg"])
+                elif log["status"] == "warning":
+                    st.warning(log["msg"])
+                else:
+                    st.success(log["msg"])
+    else:
+        st.success("✔️ **Dữ liệu đã được trích xuất an toàn từ CSDL Doanh Nghiệp**")
 
     tab1, tab2, tab3 = st.tabs(["📊 Bảng số liệu & Báo cáo", "💡 Insight & Hành động", "⚙️ Tiến trình SQL"])
     
     with tab1:
-        if "[PHÂN TÍCH]" not in answer and "[CHIẾN LƯỢC]" not in answer:
-            st.markdown(answer)
-        else:
-            st.markdown(phan_tich)
+        st.markdown(phan_tich if "[PHÂN TÍCH]" in answer else answer)
             
     with tab2:
         st.markdown(chien_luoc)
@@ -193,7 +213,7 @@ def render_assistant_response(answer):
             for sql in sql_blocks:
                 st.code(sql, language="sql")
         else:
-            st.info("Agent đã sử dụng dữ liệu ngữ cảnh hoặc tiến trình bị ngắt, không thực thi truy vấn SQL mới.")
+            st.info("Agent đã sử dụng dữ liệu ngữ cảnh hoặc tiến trình bị ngắt.")
 
 for msg in st.session_state.messages:
     if msg["role"] == "user":
@@ -201,9 +221,10 @@ for msg in st.session_state.messages:
             st.markdown(msg["content"])
     else:
         with st.chat_message("assistant"):
+            # Lịch sử chat không cần chạy lại audit
             render_assistant_response(msg["content"])
 
-if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm có tổng doanh thu..."):
+if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -214,19 +235,23 @@ if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm có tổng doanh
         if agent is None:
             st.error(status)
         else:
-            with st.spinner("Đang truy xuất Database và kiểm định dữ liệu..."):
+            # Chạy Audit Workflow ngầm
+            with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
+                current_audit = run_data_audit(get_db_uri())
+                
+            with st.spinner("Agent đang xử lý phân tích và tổng hợp Insight..."):
                 try:
                     response = agent.invoke({"input": prompt})
                     answer = response["output"]
                     
-                    render_assistant_response(answer)
+                    render_assistant_response(answer, current_audit)
                     st.session_state.messages.append({"role": "assistant", "content": answer})
                     
                 except Exception as e:
                     error_str = str(e)
                     if "[PHÂN TÍCH]" in error_str or "[BIỂU ĐỒ]" in error_str:
                         extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
-                        render_assistant_response(extracted_answer)
+                        render_assistant_response(extracted_answer, current_audit)
                         st.session_state.messages.append({"role": "assistant", "content": extracted_answer})
                     else:
                         st.error(f"Đã có lỗi hệ thống xảy ra: {e}")
