@@ -11,19 +11,18 @@ import uuid
 import sqlite3
 
 # ==========================================
-# 0. TỰ ĐỘNG TẠO DATABASE (SQLITE) NẾU CHƯA CÓ
+# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE
 # ==========================================
-DB_FILE = "ecommerce.db"
+# Ép đường dẫn tuyệt đối để tránh lỗi "no such table"
+DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
+DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
 
 def init_sqlite_db():
     """Tự động tạo file ecommerce.db và 5 bảng dữ liệu nếu file chưa tồn tại"""
-    if not os.path.exists(DB_FILE):
-        conn = sqlite3.connect(DB_FILE)
+    if not os.path.exists("ecommerce.db"):
+        conn = sqlite3.connect("ecommerce.db")
         
-        # Sếp có file CSV thật thì thay pd.DataFrame thành: pd.read_csv("ten_file.csv")
-        # Ví dụ: df_customers = pd.read_csv("customers.csv")
-        
-        # Ở đây mình tạo sẵn data giả lập để sếp test ngay lập tức mà không bị lỗi
+        # Tạo data giả lập
         df_customers = pd.DataFrame({
             'customer_id': ['C1', 'C2', 'C3', 'C4', 'C5'], 
             'customer_city': ['São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'São Paulo', 'Curitiba']
@@ -55,11 +54,10 @@ def init_sqlite_db():
         df_orderitems.to_sql('df_orderitems', conn, index=False, if_exists='replace')
         conn.close()
 
-# Chạy hàm tạo DB ngay khi khởi động app
 init_sqlite_db()
 
 # ==========================================
-# 0. QUẢN LÝ LỊCH SỬ HỘI THOẠI (MULTI-SESSION NHƯ GEMINI)
+# 0. QUẢN LÝ LỊCH SỬ HỘI THOẠI (MULTI-SESSION)
 # ==========================================
 HISTORY_FILE = "chat_history.json"
 
@@ -94,7 +92,6 @@ def clear_all_history():
 st.set_page_config(page_title="My AI agent", page_icon="🛒", layout="wide")
 st.title("🛒 My AI agent")
 st.markdown("Trợ lý AI phân tích dữ liệu, săn Insight & Hoạch định Chiến lược")
-# Đã đổi từ "Đồ án" sang "Agent" theo yêu cầu của sếp
 st.markdown("🔥 **Agent phát triển bởi: Group 3 - TINE313** 🔥")
 
 if "all_chats" not in st.session_state:
@@ -125,7 +122,6 @@ with st.sidebar:
     with col2:
         with st.popover("⚙️ Cấu hình"):
             google_api_key = st.text_input("Gemini API Key:", type="password", key="api_key")
-            # Đã bổ sung lại dòng Link lấy API Key
             st.markdown("[👉 Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
             st.markdown("---")
             st.caption("Để trống MySQL nếu muốn dùng file ecommerce.db")
@@ -230,7 +226,7 @@ def get_db_uri():
     if host and user and db_name:
         pwd_part = f":{pwd}" if pwd else ""
         return f"mysql+pymysql://{user}{pwd_part}@{host}:3306/{db_name}"
-    return f"sqlite:///{DB_FILE}"
+    return DB_URI_SQLITE
 
 def run_data_audit(db_uri):
     engine = create_engine(db_uri)
@@ -285,108 +281,4 @@ def get_agent():
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
-    code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
-    sql_blocks = re.findall(r'```sql(.*?)```', answer, re.DOTALL)
-    
-    phan_tich = "Hệ thống đã phân tích xong nhưng đầu ra bị sai định dạng hiển thị. Vui lòng thử lại."
-    chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược. Vui lòng bấm 'Chat Mới' và hỏi lại."
-    
-    if "[PHÂN TÍCH]" in answer:
-        phan_tich = answer.split("[PHÂN TÍCH]")[1].split("[")[0].strip()
-        
-    if "[CHIẾN LƯỢC]" in answer:
-        chien_luoc = answer.split("[CHIẾN LƯỢC]")[1].split("[")[0].strip()
-
-    if code_blocks:
-        combined_code = "\n".join(code_blocks)
-        try:
-            exec(combined_code)
-        except Exception as e:
-            st.warning(f"Không thể hiển thị biểu đồ: {e}")
-
-    st.markdown("---")
-    st.markdown("💡 **Hệ thống AI đã bóc tách thành công các Insight chuyên sâu từ CSDL. Xem chi tiết tại các tab bên dưới.**")
-    
-    if audit_logs:
-        with st.expander("🔍 Biên bản Kiểm định Dữ liệu (Auto-Audit Workflow)", expanded=False):
-            for log in audit_logs:
-                if log["status"] == "error":
-                    st.error(log["msg"])
-                elif log["status"] == "warning":
-                    st.warning(log["msg"])
-                else:
-                    st.success(log["msg"])
-    else:
-        st.success("✔️ **Dữ liệu đã được trích xuất an toàn từ CSDL Doanh Nghiệp**")
-
-    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Đề xuất Chiến lược", "⚙️ Tiến trình SQL"])
-    
-    with tab1:
-        st.markdown(phan_tich if "[PHÂN TÍCH]" in answer else answer)
-            
-    with tab2:
-        st.markdown(chien_luoc)
-        
-    with tab3:
-        if sql_blocks:
-            st.markdown("**Câu lệnh SQL đã được Agent thực thi:**")
-            for sql in sql_blocks:
-                st.code(sql, language="sql")
-                
-                st.markdown("**🗄️ Bảng kết quả truy xuất (Data Preview):**")
-                try:
-                    engine = create_engine(get_db_uri())
-                    df_preview = pd.read_sql(sql.strip(), engine)
-                    st.dataframe(df_preview, use_container_width=True)
-                except Exception as e:
-                    st.warning(f"Không thể hiển thị bảng trước (Preview): {e}")
-        else:
-            st.info("Agent đã sử dụng dữ liệu ngữ cảnh hoặc tiến trình bị ngắt.")
-
-# Hiển thị tin nhắn CỦA PHIÊN CHAT HIỆN TẠI
-current_messages = st.session_state.all_chats.get(st.session_state.current_session_id, [])
-
-for msg in current_messages:
-    if msg["role"] == "user":
-        with st.chat_message("user"):
-            st.markdown(msg["content"])
-    else:
-        with st.chat_message("assistant"):
-            render_assistant_response(msg["content"])
-
-if prompt := st.chat_input("VD: Phân tích doanh thu theo thành phố..."):
-    st.session_state.all_chats[st.session_state.current_session_id].append({"role": "user", "content": prompt})
-    save_history(st.session_state.all_chats)
-    
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    agent, status = get_agent()
-    
-    with st.chat_message("assistant"):
-        if agent is None:
-            st.error(status)
-        else:
-            with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
-                current_audit = run_data_audit(get_db_uri())
-                
-            with st.spinner("Agent đang xử lý phân tích và tổng hợp Insight..."):
-                try:
-                    response = agent.invoke({"input": prompt})
-                    answer = response["output"]
-                    
-                    render_assistant_response(answer, current_audit)
-                    
-                    st.session_state.all_chats[st.session_state.current_session_id].append({"role": "assistant", "content": answer})
-                    save_history(st.session_state.all_chats)
-                    
-                except Exception as e:
-                    error_str = str(e)
-                    if "[PHÂN TÍCH]" in error_str or "[BIỂU ĐỒ]" in error_str:
-                        extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
-                        render_assistant_response(extracted_answer, current_audit)
-                        
-                        st.session_state.all_chats[st.session_state.current_session_id].append({"role": "assistant", "content": extracted_answer})
-                        save_history(st.session_state.all_chats)
-                    else:
-                        st.error(f"Đã có lỗi hệ thống xảy ra: {e}")
+    code_blocks = re.findall(r'
