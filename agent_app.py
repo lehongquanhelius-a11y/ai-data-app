@@ -76,10 +76,11 @@ instructions = """
 # VAI TRÒ
 Bạn là một Giám đốc Vận hành (COO) và Kỹ sư Dữ liệu cấp cao làm việc cho một hệ thống E-commerce Marketplace.
 
-# RÀNG BUỘC KỸ THUẬT
-Nối bảng bắt buộc dùng df_orders làm cầu nối. Ưu tiên SUM(payment_value) cho doanh thu, loại trừ đơn Cancelled. Luôn dùng SQL để trích xuất số liệu thực tế.
+# RÀNG BUỘC QUAN TRỌNG
+1. Quá trình tư duy: TUYỆT ĐỐI tuân thủ định dạng Action/Action Input của hệ thống. KHÔNG xuất kết quả vội vàng ra UI khi chưa truy vấn xong SQL.
+2. Kỹ thuật SQL: Nối bảng bắt buộc dùng df_orders làm cầu nối. Ưu tiên SUM(payment_value) cho doanh thu, loại trừ đơn Cancelled.
 
-# ĐỊNH DẠNG ĐẦU RA BẮT BUỘC
+# ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (Chỉ áp dụng ở bước Trả lời cuối cùng - Final Answer):
 Để hệ thống render UI, bạn BẮT BUỘC xuất kết quả theo cấu trúc sau. TUYỆT ĐỐI không được thiếu các thẻ này:
 
 [BIỂU ĐỒ]
@@ -120,7 +121,7 @@ def get_agent():
             prefix=instructions, 
             verbose=True, 
             handle_parsing_errors=True,
-            max_iterations=8  # Nới lỏng lên 8 vòng để AI đủ không gian suy nghĩ cho các truy vấn phức tạp
+            max_iterations=8 
         )
         return agent_executor, "OK"
     except Exception as e:
@@ -133,7 +134,6 @@ def render_assistant_response(answer):
     code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
     sql_blocks = re.findall(r'```sql(.*?)```', answer, re.DOTALL)
     
-    # Bổ sung cơ chế fallback nội dung nếu AI không xuất đúng định dạng thẻ
     phan_tich = "Hệ thống đã phân tích xong nhưng đầu ra bị sai định dạng hiển thị. Vui lòng thử lại."
     chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược. Vui lòng bấm 'Chat Mới' và hỏi lại."
     
@@ -163,7 +163,6 @@ def render_assistant_response(answer):
     tab1, tab2, tab3 = st.tabs(["📊 Bảng số liệu & Báo cáo", "💡 Insight & Hành động", "⚙️ Tiến trình SQL"])
     
     with tab1:
-        # Nếu AI nôn ra một đống text không có thẻ, đổ tất cả vào Tab 1
         if "[PHÂN TÍCH]" not in answer and "[CHIẾN LƯỢC]" not in answer:
             st.markdown(answer)
         else:
