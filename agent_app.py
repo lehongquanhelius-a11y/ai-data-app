@@ -80,13 +80,13 @@ Bạn là một Giám đốc Vận hành (COO) và Kỹ sư Dữ liệu cấp ca
 Nối bảng bắt buộc dùng df_orders làm cầu nối. Ưu tiên SUM(payment_value) cho doanh thu, loại trừ đơn Cancelled. Luôn dùng SQL để trích xuất số liệu thực tế.
 
 # ĐỊNH DẠNG ĐẦU RA BẮT BUỘC
-Để hệ thống render UI, bạn BẮT BUỘC xuất kết quả theo cấu trúc sau:
+Để hệ thống render UI, bạn BẮT BUỘC xuất kết quả theo cấu trúc sau. TUYỆT ĐỐI không được thiếu các thẻ này:
 
 [BIỂU ĐỒ]
-(Cung cấp mã python dùng streamlit, pandas, matplotlib. Bọc code trong ```python...```. KHÔNG giải thích thêm ở phần này)
+(Cung cấp mã python dùng streamlit, pandas, matplotlib. Bọc code trong ```python...```)
 
 [PHÂN TÍCH]
-(Trình bày số liệu tổng quan và Insight nghịch lý tại đây)
+(Trình bày số liệu tổng quan và Insight nghịch lý)
 
 [CHIẾN LƯỢC]
 (Đề xuất chiến lược Cấp bách, Trung hạn, Dài hạn)
@@ -110,7 +110,6 @@ def get_agent():
             
         db = SQLDatabase.from_uri(db_uri)
         
-        # Trả lại bản gemini-3.6-flash theo đúng thói quen sử dụng mượt mà của sếp
         llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=google_api_key, temperature=0.2)
         
         agent_executor = create_sql_agent(
@@ -121,7 +120,7 @@ def get_agent():
             prefix=instructions, 
             verbose=True, 
             handle_parsing_errors=True,
-            max_iterations=4  # Giới hạn số vòng lặp để né 429
+            max_iterations=8  # Nới lỏng lên 8 vòng để AI đủ không gian suy nghĩ cho các truy vấn phức tạp
         )
         return agent_executor, "OK"
     except Exception as e:
@@ -134,16 +133,21 @@ def render_assistant_response(answer):
     code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
     sql_blocks = re.findall(r'```sql(.*?)```', answer, re.DOTALL)
     
-    phan_tich = "Đang cập nhật số liệu..."
-    chien_luoc = "Đang cập nhật chiến lược..."
+    # Bổ sung cơ chế fallback nội dung nếu AI không xuất đúng định dạng thẻ
+    phan_tich = "Hệ thống đã phân tích xong nhưng đầu ra bị sai định dạng hiển thị. Vui lòng thử lại."
+    chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược. Vui lòng bấm 'Chat Mới' và hỏi lại."
     
     if "[PHÂN TÍCH]" in answer:
         phan_tich_raw = answer.split("[PHÂN TÍCH]")[1]
         phan_tich = phan_tich_raw.split("[")[0].strip()
+    elif "Agent stopped due to iteration limit" in answer:
+        phan_tich = "⚠️ AI đã dừng phân tích giữa chừng vì câu hỏi quá phức tạp cần nhiều hơn 8 vòng xử lý. Vui lòng chia nhỏ câu hỏi."
         
     if "[CHIẾN LƯỢC]" in answer:
         chien_luoc_raw = answer.split("[CHIẾN LƯỢC]")[1]
         chien_luoc = chien_luoc_raw.split("[")[0].strip()
+    elif "Agent stopped due to iteration limit" in answer:
+        chien_luoc = "⚠️ Truy vấn vượt giới hạn tài nguyên tính toán hiện tại."
 
     if code_blocks:
         for code in code_blocks:
@@ -159,16 +163,22 @@ def render_assistant_response(answer):
     tab1, tab2, tab3 = st.tabs(["📊 Bảng số liệu & Báo cáo", "💡 Insight & Hành động", "⚙️ Tiến trình SQL"])
     
     with tab1:
-        st.markdown(phan_tich)
+        # Nếu AI nôn ra một đống text không có thẻ, đổ tất cả vào Tab 1
+        if "[PHÂN TÍCH]" not in answer and "[CHIẾN LƯỢC]" not in answer:
+            st.markdown(answer)
+        else:
+            st.markdown(phan_tich)
+            
     with tab2:
         st.markdown(chien_luoc)
+        
     with tab3:
         if sql_blocks:
             st.markdown("**Câu lệnh SQL đã được Agent thực thi:**")
             for sql in sql_blocks:
                 st.code(sql, language="sql")
         else:
-            st.info("Agent đã sử dụng dữ liệu ngữ cảnh, không thực thi truy vấn SQL mới.")
+            st.info("Agent đã sử dụng dữ liệu ngữ cảnh hoặc tiến trình bị ngắt, không thực thi truy vấn SQL mới.")
 
 for msg in st.session_state.messages:
     if msg["role"] == "user":
