@@ -99,7 +99,7 @@ Nối bảng bắt buộc dùng df_orders làm cầu nối. Ưu tiên SUM(paymen
 """
 
 # ==========================================
-# 4. KHỞI TẠO TÁC NHÂN (FIX LỖI 429)
+# 4. KHỞI TẠO TÁC NHÂN (FIX 429 & 404)
 # ==========================================
 def get_agent():
     if not google_api_key:
@@ -113,8 +113,8 @@ def get_agent():
             
         db = SQLDatabase.from_uri(db_uri)
         
-        # Đã đổi sang gemini-1.5-flash siêu tốc độ
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_api_key, temperature=0.2)
+        # Phiên bản lõi ổn định, không lỗi 404
+        llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=google_api_key, temperature=0.2)
         
         agent_executor = create_sql_agent(
             llm=llm, 
@@ -124,7 +124,7 @@ def get_agent():
             prefix=instructions, 
             verbose=True, 
             handle_parsing_errors=True,
-            max_iterations=4  # Khóa mỏ Agent, cấm suy nghĩ quá 4 vòng để không tốn API
+            max_iterations=4  # Giới hạn số vòng suy nghĩ để không chạm trần API
         )
         return agent_executor, "OK"
     except Exception as e:
@@ -135,70 +135,4 @@ def get_agent():
 # ==========================================
 def render_assistant_response(answer):
     code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
-    sql_blocks = re.findall(r'```sql(.*?)```', answer, re.DOTALL)
-    
-    phan_tich = "Đang cập nhật số liệu..."
-    chien_luoc = "Đang cập nhật chiến lược..."
-    
-    if "[PHÂN TÍCH]" in answer:
-        phan_tich_raw = answer.split("[PHÂN TÍCH]")[1]
-        phan_tich = phan_tich_raw.split("[")[0].strip()
-        
-    if "[CHIẾN LƯỢC]" in answer:
-        chien_luoc_raw = answer.split("[CHIẾN LƯỢC]")[1]
-        chien_luoc = chien_luoc_raw.split("[")[0].strip()
-
-    if code_blocks:
-        for code in code_blocks:
-            try:
-                exec(code)
-            except Exception as e:
-                st.warning(f"Không thể hiển thị biểu đồ: {e}")
-
-    st.markdown("---")
-    st.markdown("💡 **Phát hiện 1 điểm/xu hướng bất thường bởi dữ liệu. Xem chi tiết tại tab 'Insight & Hành động'**")
-    st.success("✔️ **Dữ liệu đã được kiểm chứng tính toàn vẹn (Độ tin cậy 100%)** — Nguồn: CSDL Doanh Nghiệp")
-
-    tab1, tab2, tab3 = st.tabs(["📊 Bảng số liệu & Báo cáo", "💡 Insight & Hành động", "⚙️ Tiến trình SQL"])
-    
-    with tab1:
-        st.markdown(phan_tich)
-    with tab2:
-        st.markdown(chien_luoc)
-    with tab3:
-        if sql_blocks:
-            st.markdown("**Câu lệnh SQL đã được Agent thực thi:**")
-            for sql in sql_blocks:
-                st.code(sql, language="sql")
-        else:
-            st.info("Agent đã sử dụng dữ liệu ngữ cảnh, không thực thi truy vấn SQL mới.")
-
-for msg in st.session_state.messages:
-    if msg["role"] == "user":
-        with st.chat_message("user"):
-            st.markdown(msg["content"])
-    else:
-        with st.chat_message("assistant"):
-            render_assistant_response(msg["content"])
-
-if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm có tổng doanh thu..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    agent, status = get_agent()
-    
-    with st.chat_message("assistant"):
-        if agent is None:
-            st.error(status)
-        else:
-            with st.spinner("Đang truy xuất Database và kiểm định dữ liệu..."):
-                try:
-                    response = agent.invoke({"input": prompt})
-                    answer = response["output"]
-                    
-                    render_assistant_response(answer)
-                            
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
-                except Exception as e:
-                    st.error(f"Đã có lỗi xảy ra: {e}")
+    sql_blocks = re.findall(r'```sql(.*?)
