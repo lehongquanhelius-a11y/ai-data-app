@@ -2,7 +2,6 @@ import streamlit as st
 from langchain_community.utilities import SQLDatabase
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.agent_toolkits import create_sql_agent
-from langchain.agents import AgentType
 import re
 
 # ==========================================
@@ -112,7 +111,7 @@ def get_agent():
             llm=llm,
             toolkit=None,
             db=db,
-            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            agent_type="zero-shot-react-description", # Thay AgentType bằng chuỗi string trực tiếp
             prefix=instructions,
             verbose=True,
             handle_parsing_errors=True
@@ -128,7 +127,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg["role"] == "assistant" and "```python" in msg["content"]:
-            code_blocks = re.findall(r'```python(.*?)```', msg["content"], re.DOTALL)
+            code_blocks = re.findall(r'```python(.*?)மல்', msg["content"], re.DOTALL)
             for code in code_blocks:
                 try:
                     exec(code)
