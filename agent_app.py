@@ -27,6 +27,10 @@ with st.sidebar:
     with col2:
         with st.popover("⚙️ Cấu hình"):
             google_api_key = st.text_input("Gemini API Key:", type="password")
+            # Thêm dòng link hướng dẫn lấy API Key
+            st.markdown("[👉 Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
+            
+            st.markdown("---")
             mysql_host = st.text_input("MySQL Host:", value="")
             mysql_user = st.text_input("Username:", value="")
             mysql_pass = st.text_input("Password:", type="password")
@@ -107,7 +111,7 @@ def get_agent():
             db_uri = "sqlite:///ecommerce.db"
             
         db = SQLDatabase.from_uri(db_uri)
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=google_api_key, temperature=0.2)
+        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=google_api_key, temperature=0.2)
         
         agent_executor = create_sql_agent(
             llm=llm, toolkit=None, db=db,
