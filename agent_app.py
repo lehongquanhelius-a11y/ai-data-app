@@ -11,19 +11,31 @@ import uuid
 import sqlite3
 
 # ==========================================
-# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE (ĐỌC TỪ CSV THẬT)
+# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE (ÉP ĐỌC CSV THẬT)
 # ==========================================
 DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
 DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
 
+@st.cache_resource(show_spinner="Đang nạp 89.000+ đơn hàng từ CSV vào hệ thống... Vui lòng đợi vài giây!")
 def init_sqlite_db():
-    # Kết nối và kiểm tra xem bảng df_orders đã tồn tại THẬT SỰ bên trong chưa
-    conn = sqlite3.connect("ecommerce.db")
+    conn = sqlite3.connect("ecommerce.db", check_same_thread=False)
     cursor = conn.cursor()
-    cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='df_orders'")
     
-    # Nếu file rỗng (hoặc chưa có bảng), tiến hành đọc 5 file CSV của sếp
-    if cursor.fetchone()[0] == 0:
+    # Kiểm tra xem bảng đã có chưa
+    cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='df_orders'")
+    has_table = cursor.fetchone()[0] > 0
+    
+    needs_update = True
+    if has_table:
+        # Nếu có bảng, đếm xem có bao nhiêu dòng
+        cursor.execute("SELECT COUNT(*) FROM df_orders")
+        row_count = cursor.fetchone()[0]
+        # Nếu đã có hơn 100 dòng tức là data thật đã được nạp, không cần update
+        if row_count > 100:
+            needs_update = False
+            
+    # Lệnh Hủy Diệt: Nếu DB trống hoặc chỉ có 5 dòng giả, ép đọc lại 5 file CSV
+    if needs_update:
         try:
             df_customers = pd.read_csv("df_Customers.csv")
             df_orders = pd.read_csv("df_Orders.csv")
@@ -31,16 +43,18 @@ def init_sqlite_db():
             df_products = pd.read_csv("df_Products.csv")
             df_orderitems = pd.read_csv("df_OrderItems.csv")
             
-            # Đổ toàn bộ 89.000+ dòng vào SQLite
+            # Đổ toàn bộ 89.000+ dòng đè lên SQLite
             df_customers.to_sql('df_customers', conn, index=False, if_exists='replace')
             df_orders.to_sql('df_orders', conn, index=False, if_exists='replace')
             df_payments.to_sql('df_payments', conn, index=False, if_exists='replace')
             df_products.to_sql('df_products', conn, index=False, if_exists='replace')
             df_orderitems.to_sql('df_orderitems', conn, index=False, if_exists='replace')
         except Exception as e:
-            print(f"Lỗi đọc file CSV: {e} - Vui lòng kiểm tra lại tên file.")
+            st.error(f"Lỗi đọc file CSV: {e} - Hãy chắc chắn 5 file CSV đang nằm chung thư mục với agent_app.py")
     conn.close()
+    return True
 
+# Chạy hàm khởi tạo Database
 init_sqlite_db()
 
 # ==========================================
@@ -270,14 +284,12 @@ def get_agent():
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
-    # Ép kiểu Regex dùng mã ASCII chống vỡ khối mã
     regex_python = tick3 + r'python(.*?)' + tick3
     code_blocks = re.findall(regex_python, answer, re.DOTALL)
     
     regex_sql = tick3 + r'sql(.*?)' + tick3
     raw_sql_blocks = re.findall(regex_sql, answer, re.DOTALL | re.IGNORECASE)
     
-    # Lọc bỏ khối rỗng và lệnh trùng lặp do AI xuất ra
     sql_blocks = []
     for s in raw_sql_blocks:
         s_clean = s.strip()
@@ -330,7 +342,6 @@ def render_assistant_response(answer, audit_logs=None):
                 st.code(sql, language="sql")
                 
                 st.markdown("**🗄️ Bảng kết quả truy xuất (Data Preview):**")
-                # Lọc lệnh SELECT để vẽ bảng, chặn lỗi khi AI gọi lệnh cấu trúc 
                 if "SELECT" in sql.upper():
                     try:
                         engine = create_engine(get_db_uri())
@@ -354,7 +365,7 @@ for msg in current_messages:
         with st.chat_message("assistant"):
             render_assistant_response(msg["content"])
 
-if prompt := st.chat_input("VD: Phân tích doanh thu theo thành phố..."):
+if prompt := st.chat_input("VD: Đếm số lượng đơn hàng..."):
     st.session_state.all_chats[st.session_state.current_session_id].append({"role": "user", "content": prompt})
     save_history(st.session_state.all_chats)
     
