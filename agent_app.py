@@ -208,7 +208,8 @@ Final Answer:
 -- Dán câu lệnh SQL đã chạy thành công
 '''
 """
-instructions = instructions_raw.replace("'''", "```")
+# Thay thế an toàn bằng mã ASCII (chr(96) = dấu nháy ngược)
+instructions = instructions_raw.replace("'''", chr(96) * 3)
 
 # ==========================================
 # 4. WORKFLOW KIỂM ĐỊNH & KẾT NỐI DATABASE
@@ -277,6 +278,118 @@ def get_agent():
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
-    # 🌟 ĐÃ FIX: Dùng thủ thuật nối chuỗi để trình duyệt không bị nhầm lẫn khi Copy
-    tick3 = '`' * 3
-    code_blocks = re.findall(fr'{tick3}python(.*?){
+    # 🌟 ĐÃ FIX: Dùng mã ASCII (96) nối chuỗi để trình duyệt không cắt xén code khi sếp copy
+    tick3 = chr(96) * 3
+    
+    regex_python = tick3 + r'python(.*?)' + tick3
+    code_blocks = re.findall(regex_python, answer, re.DOTALL)
+    
+    regex_sql = tick3 + r'sql(.*?)' + tick3
+    raw_sql_blocks = re.findall(regex_sql, answer, re.DOTALL | re.IGNORECASE)
+    sql_blocks = list(dict.fromkeys([s.strip() for s in raw_sql_blocks]))
+    
+    phan_tich = "Hệ thống đã phân tích xong nhưng đầu ra bị sai định dạng hiển thị. Vui lòng thử lại."
+    chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược. Vui lòng bấm 'Chat Mới' và hỏi lại."
+    
+    if "[PHÂN TÍCH]" in answer:
+        phan_tich = answer.split("[PHÂN TÍCH]")[1].split("[")[0].strip()
+        
+    if "[CHIẾN LƯỢC]" in answer:
+        chien_luoc = answer.split("[CHIẾN LƯỢC]")[1].split("[")[0].strip()
+
+    if code_blocks:
+        combined_code = "\n".join(code_blocks)
+        try:
+            exec(combined_code)
+        except Exception as e:
+            st.warning(f"Không thể hiển thị biểu đồ: {e}")
+
+    st.markdown("---")
+    st.markdown("💡 **Hệ thống AI đã bóc tách thành công các Insight chuyên sâu từ CSDL. Xem chi tiết tại các tab bên dưới.**")
+    
+    if audit_logs:
+        with st.expander("🔍 Biên bản Kiểm định Dữ liệu (Auto-Audit Workflow)", expanded=False):
+            for log in audit_logs:
+                if log["status"] == "error":
+                    st.error(log["msg"])
+                elif log["status"] == "warning":
+                    st.warning(log["msg"])
+                else:
+                    st.success(log["msg"])
+    else:
+        st.success("✔️ **Dữ liệu đã được trích xuất an toàn từ CSDL Doanh Nghiệp**")
+
+    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Đề xuất Chiến lược", "⚙️ Tiến trình SQL"])
+    
+    with tab1:
+        st.markdown(phan_tich if "[PHÂN TÍCH]" in answer else answer)
+            
+    with tab2:
+        st.markdown(chien_luoc)
+        
+    with tab3:
+        if sql_blocks:
+            st.markdown("**Câu lệnh SQL đã được Agent thực thi:**")
+            for sql in sql_blocks:
+                st.code(sql, language="sql")
+                
+                st.markdown("**🗄️ Bảng kết quả truy xuất (Data Preview):**")
+                if "SELECT" in sql.upper():
+                    try:
+                        engine = create_engine(get_db_uri())
+                        df_preview = pd.read_sql(sql, engine)
+                        st.dataframe(df_preview, use_container_width=True)
+                    except Exception as e:
+                        st.warning("⚠️ Lệnh SQL hợp lệ nhưng không trả về bảng dữ liệu (có thể do lỗi logic truy vấn).")
+                else:
+                    st.info("💡 Câu lệnh này không phải là lệnh truy vấn bảng (SELECT) nên không có Data Preview.")
+        else:
+            st.info("Agent đã sử dụng dữ liệu ngữ cảnh hoặc tiến trình bị ngắt.")
+
+# Hiển thị tin nhắn CỦA PHIÊN CHAT HIỆN TẠI
+current_messages = st.session_state.all_chats.get(st.session_state.current_session_id, [])
+
+for msg in current_messages:
+    if msg["role"] == "user":
+        with st.chat_message("user"):
+            st.markdown(msg["content"])
+    else:
+        with st.chat_message("assistant"):
+            render_assistant_response(msg["content"])
+
+if prompt := st.chat_input("VD: Phân tích doanh thu theo thành phố..."):
+    st.session_state.all_chats[st.session_state.current_session_id].append({"role": "user", "content": prompt})
+    save_history(st.session_state.all_chats)
+    
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    agent, status = get_agent()
+    
+    with st.chat_message("assistant"):
+        if agent is None:
+            st.error(status)
+        else:
+            with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
+                current_audit = run_data_audit(get_db_uri())
+                
+            with st.spinner("Agent đang xử lý phân tích và tổng hợp Insight..."):
+                try:
+                    response = agent.invoke({"input": prompt})
+                    answer = response["output"]
+                    
+                    render_assistant_response(answer, current_audit)
+                    
+                    st.session_state.all_chats[st.session_state.current_session_id].append({"role": "assistant", "content": answer})
+                    save_history(st.session_state.all_chats)
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    if "[PHÂN TÍCH]" in error_str or "[BIỂU ĐỒ]" in error_str:
+                        extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
+                        render_assistant_response(extracted_answer, current_audit)
+                        
+                        st.session_state.all_chats[st.session_state.current_session_id].append({"role": "assistant", "content": extracted_answer})
+                        save_history(st.session_state.all_chats)
+                    else:
+                        st.error(f"Đã có lỗi hệ thống xảy ra: {e}")
