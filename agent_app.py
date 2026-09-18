@@ -70,38 +70,49 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 3. BỘ NÃO CHIẾN LƯỢC & ÉP KHUÔN ĐẦU RA
+# 3. BỘ NÃO CHIẾN LƯỢC & ÉP KHUÔN ĐẦU RA 
 # ==========================================
-instructions = """
+# Dùng mẹo ''' thay vì 3 dấu nháy ngược để tránh lỗi đứt đoạn UI khi copy code
+instructions_raw = """
 # VAI TRÒ
-Bạn là một Giám đốc Vận hành (COO) và Kỹ sư Dữ liệu cấp cao làm việc cho một hệ thống E-commerce Marketplace.
+Bạn là Giám đốc Vận hành (COO) & Kỹ sư Dữ liệu cấp cao tại một E-commerce Marketplace.
 
-# BẢN ĐỒ CƠ SỞ DỮ LIỆU (TÀI LIỆU DÀNH CHO AI)
-- `df_orders`: Bảng trung tâm. Chứa order_id, customer_id, order_status.
-- `df_customers`: Chứa customer_id, customer_city. (Join với df_orders qua customer_id).
-- `df_payments`: Chứa order_id, payment_value. (Join với df_orders qua order_id).
-- `df_products`: Chứa product_id, product_category_name.
-- `df_orderitems`: Chứa order_id, product_id, price. (Join với df_orders qua order_id, join với df_products qua product_id).
+# BẢN ĐỒ CƠ SỞ DỮ LIỆU
+- df_orders: Bảng trung tâm. (order_id, customer_id, order_status).
+- df_customers: (customer_id, customer_city). Join với df_orders qua customer_id.
+- df_payments: (order_id, payment_value). Join với df_orders qua order_id.
+- df_products: (product_id, product_category_name).
+- df_orderitems: (order_id, product_id, price). Join df_orders qua order_id, df_products qua product_id.
 
-# RÀNG BUỘC QUAN TRỌNG
-1. Quá trình tư duy: Sử dụng ngay BẢN ĐỒ CSDL ở trên để viết trực tiếp câu lệnh SQL, KHÔNG CẦN lặp lại bước thăm dò cấu trúc bảng để tiết kiệm vòng lặp. 
-2. Kỹ thuật SQL: Nối bảng bắt buộc dùng df_orders làm cầu nối. Ưu tiên SUM(payment_value) cho doanh thu, loại trừ đơn Cancelled. KHÔNG xuất kết quả vội vàng ra UI khi chưa truy vấn xong.
+# QUY TRÌNH VẬN HÀNH BẮT BUỘC (SOP)
+1. TÌM KIẾM SỰ THẬT: BẠN BẮT BUỘC phải dùng công cụ sql_db_query để truy vấn CSDL. TUYỆT ĐỐI KHÔNG tự bịa số liệu.
+2. NỐI BẢNG: Luôn dùng df_orders làm trung tâm. Tính doanh thu bằng SUM(payment_value), loại trừ đơn Cancelled.
 
-# ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (Chỉ áp dụng ở bước Trả lời cuối cùng - Final Answer):
-Để hệ thống render UI, bạn BẮT BUỘC xuất kết quả theo cấu trúc sau. TUYỆT ĐỐI không được thiếu các thẻ này:
+# ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (FINAL ANSWER):
+Khi bạn đã có kết quả cuối cùng, bạn BẮT BUỘC phải bắt đầu bằng cụm từ "Final Answer: " sau đó mới đến các thẻ. Không được thiếu thẻ nào.
 
+Final Answer:
 [BIỂU ĐỒ]
-(Cung cấp mã python dùng streamlit, pandas, matplotlib. Bọc code trong ```python...```)
+(BẮT BUỘC gộp toàn bộ code khai báo dữ liệu và vẽ biểu đồ vào DUY NHẤT 1 khối '''python. TUYỆT ĐỐI KHÔNG chia nhỏ thành nhiều khối!)
+'''python
+# code streamlit, matplotlib gom hết vào đây
+'''
 
 [PHÂN TÍCH]
-(Trình bày số liệu tổng quan và Insight nghịch lý)
+(Trình bày phân tích bằng Markdown sắc nét, chia làm 2 ý rõ ràng:
+1. Insight cơ bản: Đọc vị các con số tổng quan, xu hướng chính, phân bổ tỷ trọng bề nổi.
+2. Insight nghịch lý/chuyên sâu: Phát hiện điểm bất thường, rủi ro ngầm, hoặc cơ hội ẩn giấu đằng sau những con số đó.)
 
 [CHIẾN LƯỢC]
-(Đề xuất chiến lược Cấp bách, Trung hạn, Dài hạn)
+(Đề xuất chiến lược hành động dựa trên cả 2 Insight vừa nêu)
 
 [SQL]
-(Cung cấp câu lệnh SQL bạn đã sử dụng, bọc trong ```sql...```)
+'''sql
+-- Dán câu lệnh SQL đã chạy thành công
+'''
 """
+# Tự động chuyển đổi lại thành 3 dấu nháy ngược cho LangChain hiểu
+instructions = instructions_raw.replace("'''", "```")
 
 # ==========================================
 # 4. KHỞI TẠO TÁC NHÂN
@@ -118,7 +129,7 @@ def get_agent():
             
         db = SQLDatabase.from_uri(db_uri)
         
-        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=google_api_key, temperature=0.2)
+        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=google_api_key, temperature=0.1)
         
         agent_executor = create_sql_agent(
             llm=llm, 
@@ -128,7 +139,7 @@ def get_agent():
             prefix=instructions, 
             verbose=True, 
             handle_parsing_errors=True,
-            max_iterations=15  # Đã tăng lên 15 vòng + thêm Bản đồ CSDL, đảm bảo không bao giờ đứt gánh
+            max_iterations=15 
         )
         return agent_executor, "OK"
     except Exception as e:
@@ -138,6 +149,8 @@ def get_agent():
 # 5. GIAO DIỆN HIỂN THỊ
 # ==========================================
 def render_assistant_response(answer):
+    answer = answer.replace("`", "") if answer.startswith("`") else answer
+    
     code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
     sql_blocks = re.findall(r'```sql(.*?)```', answer, re.DOTALL)
     
@@ -147,21 +160,17 @@ def render_assistant_response(answer):
     if "[PHÂN TÍCH]" in answer:
         phan_tich_raw = answer.split("[PHÂN TÍCH]")[1]
         phan_tich = phan_tich_raw.split("[")[0].strip()
-    elif "Agent stopped due to iteration limit" in answer:
-        phan_tich = "⚠️ AI đã dừng phân tích giữa chừng vì câu hỏi quá phức tạp cần nhiều vòng xử lý. Vui lòng thử lại."
         
     if "[CHIẾN LƯỢC]" in answer:
         chien_luoc_raw = answer.split("[CHIẾN LƯỢC]")[1]
         chien_luoc = chien_luoc_raw.split("[")[0].strip()
-    elif "Agent stopped due to iteration limit" in answer:
-        chien_luoc = "⚠️ Truy vấn vượt giới hạn tài nguyên tính toán hiện tại."
 
     if code_blocks:
-        for code in code_blocks:
-            try:
-                exec(code)
-            except Exception as e:
-                st.warning(f"Không thể hiển thị biểu đồ: {e}")
+        combined_code = "\n".join(code_blocks)
+        try:
+            exec(combined_code)
+        except Exception as e:
+            st.warning(f"Không thể hiển thị biểu đồ: {e}")
 
     st.markdown("---")
     st.markdown("💡 **Phát hiện 1 điểm/xu hướng bất thường bởi dữ liệu. Xem chi tiết tại tab 'Insight & Hành động'**")
@@ -211,7 +220,13 @@ if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm có tổng doanh
                     answer = response["output"]
                     
                     render_assistant_response(answer)
-                            
                     st.session_state.messages.append({"role": "assistant", "content": answer})
+                    
                 except Exception as e:
-                    st.error(f"Đã có lỗi xảy ra: {e}")
+                    error_str = str(e)
+                    if "[PHÂN TÍCH]" in error_str or "[BIỂU ĐỒ]" in error_str:
+                        extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
+                        render_assistant_response(extracted_answer)
+                        st.session_state.messages.append({"role": "assistant", "content": extracted_answer})
+                    else:
+                        st.error(f"Đã có lỗi hệ thống xảy ra: {e}")
