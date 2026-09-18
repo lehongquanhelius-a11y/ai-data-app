@@ -10,16 +10,18 @@ import re
 st.set_page_config(page_title="My AI agent", page_icon="🛒", layout="wide")
 st.title("🛒 My AI agent")
 st.markdown("Trợ lý AI phân tích dữ liệu, săn Insight & Hoạch định Chiến lược")
-# Dòng bản quyền cực "ngầu" của nhóm
-st.markdown("🔥 **Đồ án phát triển bởi: Group 3 - TINE313** 🔥")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ==========================================
-# 2. KHU VỰC CẤU HÌNH & SIDEBAR
+# 2. KHU VỰC CẤU HÌNH & SIDEBAR (CÓ BRANDING NHÓM)
 # ==========================================
 with st.sidebar:
+    # Đặt Brand name lên đỉnh cao nhất của thanh trái
+    st.markdown("### 🔥 Group 3 - TINE313")
+    st.markdown("---")
+    
     # Hàng nút bấm trên cùng
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -29,7 +31,6 @@ with st.sidebar:
     with col2:
         with st.popover("⚙️ Cấu hình"):
             google_api_key = st.text_input("Gemini API Key:", type="password")
-            # Thêm dòng link hướng dẫn lấy API Key
             st.markdown("[👉 Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
             
             st.markdown("---")
@@ -58,12 +59,10 @@ with st.sidebar:
     st.markdown("🕒 **Lịch sử Hội thoại**")
     st.caption("Bấm vào câu hỏi để xem lại kết quả tức thì")
     
-    # Hiển thị các câu hỏi trước đó như một danh sách
     has_history = False
     for i, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
             has_history = True
-            # Hiển thị 30 ký tự đầu của câu hỏi làm tiêu đề
             st.button(f"💬 {msg['content'][:30]}...", key=f"hist_{i}", use_container_width=True)
             
     if not has_history:
@@ -100,7 +99,7 @@ Nối bảng bắt buộc dùng df_orders làm cầu nối. Ưu tiên SUM(paymen
 """
 
 # ==========================================
-# 4. KHỞI TẠO TÁC NHÂN
+# 4. KHỞI TẠO TÁC NHÂN (FIX LỖI 429)
 # ==========================================
 def get_agent():
     if not google_api_key:
@@ -113,22 +112,28 @@ def get_agent():
             db_uri = "sqlite:///ecommerce.db"
             
         db = SQLDatabase.from_uri(db_uri)
-        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=google_api_key, temperature=0.2)
+        
+        # Đã đổi sang gemini-1.5-flash siêu tốc độ
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_api_key, temperature=0.2)
         
         agent_executor = create_sql_agent(
-            llm=llm, toolkit=None, db=db,
+            llm=llm, 
+            toolkit=None, 
+            db=db,
             agent_type="zero-shot-react-description", 
-            prefix=instructions, verbose=True, handle_parsing_errors=True
+            prefix=instructions, 
+            verbose=True, 
+            handle_parsing_errors=True,
+            max_iterations=4  # Khóa mỏ Agent, cấm suy nghĩ quá 4 vòng để không tốn API
         )
         return agent_executor, "OK"
     except Exception as e:
         return None, str(e)
 
 # ==========================================
-# 5. GIAO DIỆN HIỂN THỊ (THEO ẢNH MẪU)
+# 5. GIAO DIỆN HIỂN THỊ 
 # ==========================================
 def render_assistant_response(answer):
-    # 1. Bóc tách dữ liệu
     code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
     sql_blocks = re.findall(r'```sql(.*?)```', answer, re.DOTALL)
     
@@ -143,7 +148,6 @@ def render_assistant_response(answer):
         chien_luoc_raw = answer.split("[CHIẾN LƯỢC]")[1]
         chien_luoc = chien_luoc_raw.split("[")[0].strip()
 
-    # 2. Render Biểu đồ ở trên cùng
     if code_blocks:
         for code in code_blocks:
             try:
@@ -151,12 +155,10 @@ def render_assistant_response(answer):
             except Exception as e:
                 st.warning(f"Không thể hiển thị biểu đồ: {e}")
 
-    # 3. Render Thanh thông báo AI Kiểm định 
     st.markdown("---")
     st.markdown("💡 **Phát hiện 1 điểm/xu hướng bất thường bởi dữ liệu. Xem chi tiết tại tab 'Insight & Hành động'**")
     st.success("✔️ **Dữ liệu đã được kiểm chứng tính toàn vẹn (Độ tin cậy 100%)** — Nguồn: CSDL Doanh Nghiệp")
 
-    # 4. Render Tabs chuyên sâu
     tab1, tab2, tab3 = st.tabs(["📊 Bảng số liệu & Báo cáo", "💡 Insight & Hành động", "⚙️ Tiến trình SQL"])
     
     with tab1:
@@ -171,7 +173,6 @@ def render_assistant_response(answer):
         else:
             st.info("Agent đã sử dụng dữ liệu ngữ cảnh, không thực thi truy vấn SQL mới.")
 
-# Hiển thị lịch sử chat
 for msg in st.session_state.messages:
     if msg["role"] == "user":
         with st.chat_message("user"):
@@ -180,7 +181,6 @@ for msg in st.session_state.messages:
         with st.chat_message("assistant"):
             render_assistant_response(msg["content"])
 
-# Ô nhập liệu
 if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm có tổng doanh thu..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
