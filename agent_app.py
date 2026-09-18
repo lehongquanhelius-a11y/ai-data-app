@@ -8,6 +8,55 @@ from sqlalchemy import create_engine
 import json
 import os
 import uuid
+import sqlite3
+
+# ==========================================
+# 0. TỰ ĐỘNG TẠO DATABASE (SQLITE) NẾU CHƯA CÓ
+# ==========================================
+DB_FILE = "ecommerce.db"
+
+def init_sqlite_db():
+    """Tự động tạo file ecommerce.db và 5 bảng dữ liệu nếu file chưa tồn tại"""
+    if not os.path.exists(DB_FILE):
+        conn = sqlite3.connect(DB_FILE)
+        
+        # Sếp có file CSV thật thì thay pd.DataFrame thành: pd.read_csv("ten_file.csv")
+        # Ví dụ: df_customers = pd.read_csv("customers.csv")
+        
+        # Ở đây mình tạo sẵn data giả lập để sếp test ngay lập tức mà không bị lỗi
+        df_customers = pd.DataFrame({
+            'customer_id': ['C1', 'C2', 'C3', 'C4', 'C5'], 
+            'customer_city': ['São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'São Paulo', 'Curitiba']
+        })
+        df_orders = pd.DataFrame({
+            'order_id': ['O1', 'O2', 'O3', 'O4', 'O5'], 
+            'customer_id': ['C1', 'C2', 'C3', 'C4', 'C5'], 
+            'order_status': ['delivered', 'canceled', 'delivered', 'delivered', 'delivered']
+        })
+        df_payments = pd.DataFrame({
+            'order_id': ['O1', 'O2', 'O3', 'O4', 'O5'], 
+            'payment_value': [150.5, 200.0, 99.9, 350.0, 45.0]
+        })
+        df_products = pd.DataFrame({
+            'product_id': ['P1', 'P2', 'P3'], 
+            'product_category_name': ['Electronics', 'Fashion', 'Home']
+        })
+        df_orderitems = pd.DataFrame({
+            'order_id': ['O1', 'O2', 'O3', 'O4', 'O5'], 
+            'product_id': ['P1', 'P2', 'P3', 'P1', 'P2'], 
+            'price': [150.5, 200.0, 99.9, 350.0, 45.0]
+        })
+        
+        # Đổ data vào Database
+        df_customers.to_sql('df_customers', conn, index=False, if_exists='replace')
+        df_orders.to_sql('df_orders', conn, index=False, if_exists='replace')
+        df_payments.to_sql('df_payments', conn, index=False, if_exists='replace')
+        df_products.to_sql('df_products', conn, index=False, if_exists='replace')
+        df_orderitems.to_sql('df_orderitems', conn, index=False, if_exists='replace')
+        conn.close()
+
+# Chạy hàm tạo DB ngay khi khởi động app
+init_sqlite_db()
 
 # ==========================================
 # 0. QUẢN LÝ LỊCH SỬ HỘI THOẠI (MULTI-SESSION NHƯ GEMINI)
@@ -45,7 +94,8 @@ def clear_all_history():
 st.set_page_config(page_title="My AI agent", page_icon="🛒", layout="wide")
 st.title("🛒 My AI agent")
 st.markdown("Trợ lý AI phân tích dữ liệu, săn Insight & Hoạch định Chiến lược")
-st.markdown("🔥 **Đồ án phát triển bởi: Group 3 - TINE313** 🔥")
+# Đã đổi từ "Đồ án" sang "Agent" theo yêu cầu của sếp
+st.markdown("🔥 **Agent phát triển bởi: Group 3 - TINE313** 🔥")
 
 if "all_chats" not in st.session_state:
     st.session_state.all_chats = load_history()
@@ -74,12 +124,15 @@ with st.sidebar:
             st.rerun()
     with col2:
         with st.popover("⚙️ Cấu hình"):
-            google_api_key = st.text_input("Gemini API Key:", type="password")
+            google_api_key = st.text_input("Gemini API Key:", type="password", key="api_key")
+            # Đã bổ sung lại dòng Link lấy API Key
+            st.markdown("[👉 Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
             st.markdown("---")
-            mysql_host = st.text_input("MySQL Host:", value="")
-            mysql_user = st.text_input("Username:", value="")
-            mysql_pass = st.text_input("Password:", type="password")
-            mysql_db = st.text_input("Database:", value="")
+            st.caption("Để trống MySQL nếu muốn dùng file ecommerce.db")
+            mysql_host = st.text_input("MySQL Host:", key="db_host")
+            mysql_user = st.text_input("Username:", key="db_user")
+            mysql_pass = st.text_input("Password:", type="password", key="db_pass")
+            mysql_db = st.text_input("Database:", key="db_name")
 
     st.markdown("---")
     st.markdown("📂 **Danh mục Bảng Dữ liệu**")
@@ -169,10 +222,15 @@ instructions = instructions_raw.replace("'''", "```")
 # 4. WORKFLOW KIỂM ĐỊNH & KẾT NỐI DATABASE
 # ==========================================
 def get_db_uri():
-    if mysql_host and mysql_user and mysql_db:
-        pwd_part = f":{mysql_pass}" if mysql_pass else ""
-        return f"mysql+pymysql://{mysql_user}{pwd_part}@{mysql_host}:3306/{mysql_db}"
-    return "sqlite:///ecommerce.db"
+    host = st.session_state.get("db_host", "")
+    user = st.session_state.get("db_user", "")
+    pwd = st.session_state.get("db_pass", "")
+    db_name = st.session_state.get("db_name", "")
+    
+    if host and user and db_name:
+        pwd_part = f":{pwd}" if pwd else ""
+        return f"mysql+pymysql://{user}{pwd_part}@{host}:3306/{db_name}"
+    return f"sqlite:///{DB_FILE}"
 
 def run_data_audit(db_uri):
     engine = create_engine(db_uri)
@@ -199,12 +257,13 @@ def run_data_audit(db_uri):
 # 5. KHỞI TẠO TÁC NHÂN
 # ==========================================
 def get_agent():
-    if not google_api_key:
+    api_key = st.session_state.get("api_key", "")
+    if not api_key:
         return None, "Vui lòng nhập API Key trong mục Cấu hình."
     try:
         db_uri = get_db_uri()
         db = SQLDatabase.from_uri(db_uri)
-        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=google_api_key, temperature=0.1)
+        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
         
         agent_executor = create_sql_agent(
             llm=llm, 
@@ -246,8 +305,6 @@ def render_assistant_response(answer, audit_logs=None):
             st.warning(f"Không thể hiển thị biểu đồ: {e}")
 
     st.markdown("---")
-    
-    # 🌟 SỬA ĐIỂM SỐ 1: Sửa câu cứng nhắc thành thông báo trung lập, chuyên nghiệp
     st.markdown("💡 **Hệ thống AI đã bóc tách thành công các Insight chuyên sâu từ CSDL. Xem chi tiết tại các tab bên dưới.**")
     
     if audit_logs:
@@ -276,13 +333,10 @@ def render_assistant_response(answer, audit_logs=None):
             for sql in sql_blocks:
                 st.code(sql, language="sql")
                 
-                # 🌟 SỬA ĐIỂM SỐ 2: Tự động chạy SQL và vẽ bảng kết quả như MySQL Workbench
                 st.markdown("**🗄️ Bảng kết quả truy xuất (Data Preview):**")
                 try:
                     engine = create_engine(get_db_uri())
-                    # Chạy câu lệnh SQL để lấy data table
                     df_preview = pd.read_sql(sql.strip(), engine)
-                    # Hiển thị bảng Dataframe rất đẹp bằng Streamlit
                     st.dataframe(df_preview, use_container_width=True)
                 except Exception as e:
                     st.warning(f"Không thể hiển thị bảng trước (Preview): {e}")
@@ -300,7 +354,7 @@ for msg in current_messages:
         with st.chat_message("assistant"):
             render_assistant_response(msg["content"])
 
-if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm..."):
+if prompt := st.chat_input("VD: Phân tích doanh thu theo thành phố..."):
     st.session_state.all_chats[st.session_state.current_session_id].append({"role": "user", "content": prompt})
     save_history(st.session_state.all_chats)
     
