@@ -11,44 +11,34 @@ import uuid
 import sqlite3
 
 # ==========================================
-# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE
+# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE (ĐỌC TỪ CSV THẬT)
 # ==========================================
+DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
+DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
+
 def init_sqlite_db():
     # Kết nối và kiểm tra xem bảng df_orders đã tồn tại THẬT SỰ bên trong chưa
     conn = sqlite3.connect("ecommerce.db")
     cursor = conn.cursor()
     cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='df_orders'")
     
-    # Nếu file rỗng (hoặc chưa có bảng), tiến hành bơm data mẫu
+    # Nếu file rỗng (hoặc chưa có bảng), tiến hành đọc 5 file CSV của sếp
     if cursor.fetchone()[0] == 0:
-        df_customers = pd.DataFrame({
-            'customer_id': ['C1', 'C2', 'C3', 'C4', 'C5'], 
-            'customer_city': ['São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'São Paulo', 'Curitiba']
-        })
-        df_orders = pd.DataFrame({
-            'order_id': ['O1', 'O2', 'O3', 'O4', 'O5'], 
-            'customer_id': ['C1', 'C2', 'C3', 'C4', 'C5'], 
-            'order_status': ['delivered', 'canceled', 'delivered', 'delivered', 'delivered']
-        })
-        df_payments = pd.DataFrame({
-            'order_id': ['O1', 'O2', 'O3', 'O4', 'O5'], 
-            'payment_value': [150.5, 200.0, 99.9, 350.0, 45.0]
-        })
-        df_products = pd.DataFrame({
-            'product_id': ['P1', 'P2', 'P3'], 
-            'product_category_name': ['Electronics', 'Fashion', 'Home']
-        })
-        df_orderitems = pd.DataFrame({
-            'order_id': ['O1', 'O2', 'O3', 'O4', 'O5'], 
-            'product_id': ['P1', 'P2', 'P3', 'P1', 'P2'], 
-            'price': [150.5, 200.0, 99.9, 350.0, 45.0]
-        })
-        
-        df_customers.to_sql('df_customers', conn, index=False, if_exists='replace')
-        df_orders.to_sql('df_orders', conn, index=False, if_exists='replace')
-        df_payments.to_sql('df_payments', conn, index=False, if_exists='replace')
-        df_products.to_sql('df_products', conn, index=False, if_exists='replace')
-        df_orderitems.to_sql('df_orderitems', conn, index=False, if_exists='replace')
+        try:
+            df_customers = pd.read_csv("df_Customers.csv")
+            df_orders = pd.read_csv("df_Orders.csv")
+            df_payments = pd.read_csv("df_Payments.csv")
+            df_products = pd.read_csv("df_Products.csv")
+            df_orderitems = pd.read_csv("df_OrderItems.csv")
+            
+            # Đổ toàn bộ 89.000+ dòng vào SQLite
+            df_customers.to_sql('df_customers', conn, index=False, if_exists='replace')
+            df_orders.to_sql('df_orders', conn, index=False, if_exists='replace')
+            df_payments.to_sql('df_payments', conn, index=False, if_exists='replace')
+            df_products.to_sql('df_products', conn, index=False, if_exists='replace')
+            df_orderitems.to_sql('df_orderitems', conn, index=False, if_exists='replace')
+        except Exception as e:
+            print(f"Lỗi đọc file CSV: {e} - Vui lòng kiểm tra lại tên file.")
     conn.close()
 
 init_sqlite_db()
@@ -209,6 +199,7 @@ Final Answer:
 -- Dán câu lệnh SQL đã chạy thành công
 '''
 """
+# Bảo kê chống rách code khi Copy bằng ASCII 96 (dấu nháy ngược)
 tick3 = chr(96) * 3
 instructions = instructions_raw.replace("'''", tick3)
 
@@ -224,7 +215,7 @@ def get_db_uri():
     if host and user and db_name:
         pwd_part = f":{pwd}" if pwd else ""
         return f"mysql+pymysql://{user}{pwd_part}@{host}:3306/{db_name}"
-    return "sqlite:///ecommerce.db"
+    return DB_URI_SQLITE
 
 def run_data_audit(db_uri):
     engine = create_engine(db_uri)
@@ -279,13 +270,14 @@ def get_agent():
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
+    # Ép kiểu Regex dùng mã ASCII chống vỡ khối mã
     regex_python = tick3 + r'python(.*?)' + tick3
     code_blocks = re.findall(regex_python, answer, re.DOTALL)
     
     regex_sql = tick3 + r'sql(.*?)' + tick3
     raw_sql_blocks = re.findall(regex_sql, answer, re.DOTALL | re.IGNORECASE)
     
-    # 🌟 ĐÃ FIX: Lọc bỏ các khối rỗng do AI lỡ tay tạo ra
+    # Lọc bỏ khối rỗng và lệnh trùng lặp do AI xuất ra
     sql_blocks = []
     for s in raw_sql_blocks:
         s_clean = s.strip()
@@ -338,13 +330,13 @@ def render_assistant_response(answer, audit_logs=None):
                 st.code(sql, language="sql")
                 
                 st.markdown("**🗄️ Bảng kết quả truy xuất (Data Preview):**")
+                # Lọc lệnh SELECT để vẽ bảng, chặn lỗi khi AI gọi lệnh cấu trúc 
                 if "SELECT" in sql.upper():
                     try:
                         engine = create_engine(get_db_uri())
                         df_preview = pd.read_sql(sql, engine)
                         st.dataframe(df_preview, use_container_width=True)
                     except Exception as e:
-                        # 🌟 ĐÃ FIX: In lỗi thực tế để bắt bệnh nếu SQL sai
                         st.error(f"⚠️ Lỗi truy xuất CSDL: {e}")
                 else:
                     st.info("💡 Câu lệnh này không phải là lệnh truy vấn bảng (SELECT) nên không có Data Preview.")
