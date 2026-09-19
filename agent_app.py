@@ -9,7 +9,6 @@ import json
 import os
 import uuid
 import sqlite3
-import textwrap
 import plotly.express as px
 
 # ==========================================
@@ -123,7 +122,7 @@ with st.sidebar:
             groq_api_key = st.text_input("Groq API Key:", type="password", key="api_key")
             st.markdown("[👉 Lấy API Key tại đây](https://console.groq.com/keys)")
             st.markdown("---")
-            st.caption("Để trống MySQL nếu muốn dùng file ecommerce.db")
+            st.caption("Để trống MySQL nếu muốn dùng file ecommerce.db (Mặc định)")
             mysql_host = st.text_input("MySQL Host:", key="db_host")
             mysql_user = st.text_input("Username:", key="db_user")
             mysql_pass = st.text_input("Password:", type="password", key="db_pass")
@@ -184,15 +183,16 @@ Khi bạn đã có kết quả cuối cùng, bạn BẮT BUỘC phải bắt đ�
 
 Final Answer:
 [BIỂU ĐỒ]
-(BẮT BUỘC cấu hình biểu đồ theo định dạng JSON bên dưới. TUYỆT ĐỐI KHÔNG VIẾT CODE PYTHON. Hãy trả về JSON chuẩn xác nằm trong khối '''json)
+(BẮT BUỘC cấu hình biểu đồ theo định dạng JSON bên dưới. TUYỆT ĐỐI KHÔNG VIẾT CODE PYTHON, TUYỆT ĐỐI KHÔNG VIẾT COMMENT DẠNG // TRONG JSON. Hãy trả về JSON chuẩn xác nằm trong khối '''json)
 '''json
 {
-    "type": "bar", // Chọn 1 trong: bar, line, pie, scatter, hoặc none
-    "x": "tên_cột_x", // BẮT BUỘC phải có trong câu SQL bên dưới
-    "y": "tên_cột_y", // BẮT BUỘC phải có trong câu SQL bên dưới
+    "type": "bar",
+    "x": "tên_cột_x",
+    "y": "tên_cột_y",
     "title": "Tiêu đề biểu đồ"
 }
 '''
+(Ghi chú: type chỉ được chọn 1 trong: bar, line, pie, scatter, hoặc none. x và y phải khớp với cột trong lệnh SQL).
 
 [PHÂN TÍCH]
 (Trình bày phân tích bằng Markdown sắc nét, chia làm 2 ý rõ ràng: Insight cơ bản và Insight chuyên sâu)
@@ -258,11 +258,12 @@ def run_data_audit(db_uri):
 def get_agent():
     api_key = st.session_state.get("api_key", "")
     if not api_key:
-        return None, "Vui lòng nhập Groq API Key trong mục Cấu hình."
+        return None, "Vui lòng nhập Groq API Key trong mục ⚙️ Cấu hình."
     try:
         db_uri = get_db_uri()
         db = SQLDatabase.from_uri(db_uri)
-        # Sử dụng Groq Llama 3 thay vì Gemini
+        
+        # Sử dụng Groq Llama 3
         llm = ChatGroq(model_name="llama3-70b-8192", groq_api_key=api_key, temperature=0.1)
         
         agent_executor = create_sql_agent(
@@ -350,8 +351,10 @@ def render_assistant_response(answer, audit_logs=None):
         if df_preview is not None and not df_preview.empty and json_blocks:
             st.markdown("---")
             try:
+                # Parse cấu hình JSON của AI
                 chart_spec = json.loads(json_blocks[0].strip())
                 c_type = chart_spec.get("type", "none")
+                
                 if c_type != "none":
                     x_col = chart_spec.get("x")
                     y_col = chart_spec.get("y")
@@ -365,8 +368,10 @@ def render_assistant_response(answer, audit_logs=None):
                         st.plotly_chart(px.line(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
                     elif c_type == "scatter":
                         st.plotly_chart(px.scatter(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
+            except json.JSONDecodeError as e:
+                st.warning(f"⚠️ **Không thể vẽ biểu đồ do AI định dạng JSON lỗi:** {e}")
             except Exception as e:
-                st.warning(f"⚠️ **Không thể vẽ biểu đồ do cấu trúc JSON không khớp dữ liệu:** {e}")
+                st.warning(f"⚠️ **Không thể vẽ biểu đồ do cột dữ liệu không khớp:** {e}")
             
     with tab2:
         st.markdown(chien_luoc)
