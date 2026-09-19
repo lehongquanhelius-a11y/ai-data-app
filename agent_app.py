@@ -257,8 +257,8 @@ def get_agent():
         db_uri = get_db_uri()
         db = SQLDatabase.from_uri(db_uri)
         
-        # Đã cập nhật lên model Llama 3.1 mới nhất được Groq hỗ trợ
-        llm = ChatGroq(model_name="llama-3.1-70b-versatile", groq_api_key=api_key, temperature=0.1)
+        # Đã cập nhật lên model Llama 3.3 mới nhất được Groq hỗ trợ
+        llm = ChatGroq(model_name="llama-3.3-70b-versatile", groq_api_key=api_key, temperature=0.1)
         
         agent_executor = create_sql_agent(
             llm=llm, 
