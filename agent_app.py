@@ -1,6 +1,6 @@
 import streamlit as st
 from langchain_community.utilities import SQLDatabase
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_community.agent_toolkits import create_sql_agent
 import re
 import pandas as pd
@@ -10,6 +10,7 @@ import os
 import uuid
 import sqlite3
 import textwrap
+import plotly.express as px
 
 # ==========================================
 # 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE (ĐỌC CSV BẤT TỬ)
@@ -48,7 +49,7 @@ def init_sqlite_db():
             df_products.to_sql('df_products', conn, index=False, if_exists='replace')
             df_orderitems.to_sql('df_orderitems', conn, index=False, if_exists='replace')
         except Exception as e:
-            st.error(f"Lỗi đọc file CSV: {e} - Hãy chắc chắn 5 file CSV đang nằm chung thư mục với agent_app.py")
+            st.error(f"Lỗi đọc file CSV: {e} - Hãy chắc chắn 5 file CSV đang nằm chung thư mục với app.py")
     conn.close()
     return True
 
@@ -119,8 +120,8 @@ with st.sidebar:
             st.rerun()
     with col2:
         with st.popover("⚙️ Cấu hình"):
-            google_api_key = st.text_input("Gemini API Key:", type="password", key="api_key")
-            st.markdown("[👉 Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
+            groq_api_key = st.text_input("Groq API Key:", type="password", key="api_key")
+            st.markdown("[👉 Lấy API Key tại đây](https://console.groq.com/keys)")
             st.markdown("---")
             st.caption("Để trống MySQL nếu muốn dùng file ecommerce.db")
             mysql_host = st.text_input("MySQL Host:", key="db_host")
@@ -167,7 +168,7 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 3. BỘ NÃO CHIẾN LƯỢC & ÉP KHUÔN ĐẦU RA 
+# 3. BỘ NÃO CHIẾN LƯỢC (TÍCH HỢP BIỂU ĐỒ V2)
 # ==========================================
 instructions_raw = """
 # VAI TRÒ
@@ -183,15 +184,14 @@ Khi bạn đã có kết quả cuối cùng, bạn BẮT BUỘC phải bắt đ�
 
 Final Answer:
 [BIỂU ĐỒ]
-(BẮT BUỘC CHỦ ĐỘNG VẼ BIỂU ĐỒ MINH HỌA CHO INSIGHT. 
-⚠️ LUẬT VẼ BIỂU ĐỒ: BẠN PHẢI TỰ HARDCODE DỮ LIỆU ĐÃ TRUY VẤN ĐƯỢC VÀO PANDAS DATAFRAME TRONG ĐOẠN CODE NÀY. TUYỆT ĐỐI KHÔNG CHÈN THÊM BẤT KỲ CÂU TIẾNG ANH NÀO VÀO TRONG CODE.
-Gộp toàn bộ code streamlit (st.bar_chart, st.line_chart...) vào DUY NHẤT 1 khối '''python)
-'''python
-import pandas as pd
-import streamlit as st
-import matplotlib.pyplot as plt
-import seaborn as sns
-# Tạo dataframe từ số liệu thô và vẽ biểu đồ tại đây
+(BẮT BUỘC cấu hình biểu đồ theo định dạng JSON bên dưới. TUYỆT ĐỐI KHÔNG VIẾT CODE PYTHON. Hãy trả về JSON chuẩn xác nằm trong khối '''json)
+'''json
+{
+    "type": "bar", // Chọn 1 trong: bar, line, pie, scatter, hoặc none
+    "x": "tên_cột_x", // BẮT BUỘC phải có trong câu SQL bên dưới
+    "y": "tên_cột_y", // BẮT BUỘC phải có trong câu SQL bên dưới
+    "title": "Tiêu đề biểu đồ"
+}
 '''
 
 [PHÂN TÍCH]
@@ -202,7 +202,7 @@ import seaborn as sns
 
 [SQL]
 '''sql
--- Dán câu lệnh SQL đã chạy thành công
+-- Dán câu lệnh SQL đã chạy thành công (BẮT BUỘC phải trả về để hệ thống dùng truy xuất dữ liệu vẽ biểu đồ)
 '''
 """
 tick3 = chr(96) * 3
@@ -253,16 +253,17 @@ def run_data_audit(db_uri):
     return audit_logs
 
 # ==========================================
-# 5. KHỞI TẠO TÁC NHÂN
+# 5. KHỞI TẠO TÁC NHÂN GROQ
 # ==========================================
 def get_agent():
     api_key = st.session_state.get("api_key", "")
     if not api_key:
-        return None, "Vui lòng nhập API Key trong mục Cấu hình."
+        return None, "Vui lòng nhập Groq API Key trong mục Cấu hình."
     try:
         db_uri = get_db_uri()
         db = SQLDatabase.from_uri(db_uri)
-        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
+        # Sử dụng Groq Llama 3 thay vì Gemini
+        llm = ChatGroq(model_name="llama3-70b-8192", groq_api_key=api_key, temperature=0.1)
         
         agent_executor = create_sql_agent(
             llm=llm, 
@@ -279,17 +280,14 @@ def get_agent():
         return None, str(e)
 
 # ==========================================
-# 6. GIAO DIỆN HIỂN THỊ (BẢN CẤP CỨU CHỐNG LỖI)
+# 6. GIAO DIỆN HIỂN THỊ (BẢN TÍCH HỢP PLOTLY V2)
 # ==========================================
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
-    # --- TRÍCH XUẤT CODE PYTHON & SQL CỰC AN TOÀN ---
-    code_blocks = []
-    raw_py_blocks = re.findall(fr'{tick3}python\s*(.*?){tick3}', answer, re.DOTALL | re.IGNORECASE)
-    for b in raw_py_blocks:
-        code_blocks.append(b)
-
+    # --- TRÍCH XUẤT JSON (V2) & SQL ---
+    json_blocks = re.findall(fr'{tick3}json\s*(.*?){tick3}', answer, re.DOTALL | re.IGNORECASE)
+    
     sql_blocks = []
     raw_sql_blocks = re.findall(fr'{tick3}sql\s*(.*?){tick3}', answer, re.DOTALL | re.IGNORECASE)
     for s in raw_sql_blocks:
@@ -297,7 +295,7 @@ def render_assistant_response(answer, audit_logs=None):
         if s_clean and s_clean not in sql_blocks:
             sql_blocks.append(s_clean)
             
-    # --- THUẬT TOÁN BÓC TÁCH VĂN BẢN THÔNG MINH ---
+    # --- BÓC TÁCH VĂN BẢN V1 ---
     phan_tich = answer
     chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược hoặc chiến lược đã được gộp chung ở Tab Báo cáo Phân tích."
     
@@ -317,27 +315,6 @@ def render_assistant_response(answer, audit_logs=None):
         phan_tich = re.sub(fr'{tick3}.*?{tick3}', '', phan_tich, flags=re.DOTALL)
         phan_tich = phan_tich.replace("Final Answer:", "").replace("[BIỂU ĐỒ]", "").strip()
 
-    # --- THỰC THI BIỂU ĐỒ (LỌC SẠCH RÁC TIẾNG ANH TRONG CODE) ---
-    if code_blocks:
-        combined_code = "\n".join(code_blocks)
-        
-        # LỌC RÁC: Xóa ngay lập tức mọi dòng bắt đầu bằng dấu "..." hoặc có chứa chữ "EXACTLY ONE python code block"
-        clean_lines = []
-        for line in combined_code.split('\n'):
-            if not line.strip().startswith('...') and "EXACTLY ONE python code block" not in line:
-                clean_lines.append(line)
-        
-        clean_code = "\n".join(clean_lines)
-        clean_code = textwrap.dedent(clean_code).strip()
-        
-        if clean_code:
-            try:
-                # Import đầy đủ thư viện để phòng ngừa lỗi
-                exec_globals = {'st': st, 'pd': pd, 'plt': __import__('matplotlib.pyplot').pyplot, 'sns': __import__('seaborn')}
-                exec(clean_code, exec_globals)
-            except Exception as e:
-                st.warning(f"⚠️ **AI viết code vẽ biểu đồ bị lỗi:** {e}\n\n*Code gốc của AI (Dành cho Debug):*\n```python\n{clean_code}\n```")
-
     st.markdown("---")
     st.markdown("💡 **Hệ thống AI đã bóc tách thành công Insight từ CSDL. Xem chi tiết tại các tab bên dưới.**")
     
@@ -353,10 +330,43 @@ def render_assistant_response(answer, audit_logs=None):
     else:
         st.success("✔️ **Dữ liệu đã được trích xuất an toàn từ CSDL Doanh Nghiệp**")
 
-    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Đề xuất Chiến lược", "⚙️ Tiến trình SQL"])
+    # THỰC THI SQL ĐỂ LẤY DỮ LIỆU CHO PLOTLY
+    df_preview = None
+    if sql_blocks:
+        sql_to_run = sql_blocks[-1]
+        if "SELECT" in sql_to_run.upper():
+            try:
+                engine = create_engine(get_db_uri())
+                df_preview = pd.read_sql(sql_to_run, engine)
+            except Exception as e:
+                st.error(f"⚠️ Lỗi truy xuất CSDL: {e}")
+
+    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích & Biểu đồ", "💡 Đề xuất Chiến lược", "⚙️ Tiến trình SQL"])
     
     with tab1:
         st.markdown(phan_tich if phan_tich else "Không tìm thấy nội dung phân tích.")
+        
+        # VẼ BIỂU ĐỒ BẰNG CƠ CHẾ PLOTLY V2
+        if df_preview is not None and not df_preview.empty and json_blocks:
+            st.markdown("---")
+            try:
+                chart_spec = json.loads(json_blocks[0].strip())
+                c_type = chart_spec.get("type", "none")
+                if c_type != "none":
+                    x_col = chart_spec.get("x")
+                    y_col = chart_spec.get("y")
+                    title = chart_spec.get("title", "Biểu đồ Phân tích")
+                    
+                    if c_type == "bar":
+                        st.plotly_chart(px.bar(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
+                    elif c_type == "pie":
+                        st.plotly_chart(px.pie(df_preview, names=x_col, values=y_col, title=title), use_container_width=True)
+                    elif c_type == "line":
+                        st.plotly_chart(px.line(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
+                    elif c_type == "scatter":
+                        st.plotly_chart(px.scatter(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
+            except Exception as e:
+                st.warning(f"⚠️ **Không thể vẽ biểu đồ do cấu trúc JSON không khớp dữ liệu:** {e}")
             
     with tab2:
         st.markdown(chien_luoc)
@@ -366,16 +376,9 @@ def render_assistant_response(answer, audit_logs=None):
             st.markdown("**Câu lệnh SQL đã được Agent thực thi:**")
             for sql in sql_blocks:
                 st.code(sql, language="sql")
+            if df_preview is not None:
                 st.markdown("**🗄️ Bảng kết quả truy xuất (Data Preview):**")
-                if "SELECT" in sql.upper():
-                    try:
-                        engine = create_engine(get_db_uri())
-                        df_preview = pd.read_sql(sql, engine)
-                        st.dataframe(df_preview, use_container_width=True)
-                    except Exception as e:
-                        st.error(f"⚠️ Lỗi truy xuất CSDL: {e}")
-                else:
-                    st.info("💡 Câu lệnh này không phải là lệnh truy vấn bảng (SELECT) nên không có Data Preview.")
+                st.dataframe(df_preview, use_container_width=True)
         else:
             st.info("Agent đã sử dụng dữ liệu ngữ cảnh hoặc tiến trình bị ngắt.")
 
@@ -406,7 +409,7 @@ if prompt := st.chat_input("VD: Cho tôi insights về địa lý..."):
             with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
                 current_audit = run_data_audit(get_db_uri())
                 
-            with st.spinner("Agent đang xử lý phân tích và tổng hợp Insight..."):
+            with st.spinner("Agent đang phân tích và lên biểu đồ với tốc độ của Groq..."):
                 try:
                     response = agent.invoke({"input": prompt})
                     answer = response["output"]
