@@ -192,7 +192,6 @@ Final Answer:
     "title": "Tiêu đề biểu đồ"
 }
 '''
-(Ghi chú: type chỉ được chọn 1 trong: bar, line, pie, scatter, hoặc none. x và y phải khớp với cột trong lệnh SQL).
 
 [PHÂN TÍCH]
 (Trình bày phân tích bằng Markdown sắc nét, chia làm 2 ý rõ ràng: Insight cơ bản và Insight chuyên sâu)
@@ -347,19 +346,37 @@ def render_assistant_response(answer, audit_logs=None):
     with tab1:
         st.markdown(phan_tich if phan_tich else "Không tìm thấy nội dung phân tích.")
         
-        # VẼ BIỂU ĐỒ BẰNG CƠ CHẾ PLOTLY V2
+        # VẼ BIỂU ĐỒ BẰNG CƠ CHẾ PLOTLY V2 (VỚI BỘ LỌC JSON BẤT TỬ)
         if df_preview is not None and not df_preview.empty and json_blocks:
             st.markdown("---")
+            raw_json = json_blocks[0].strip()
+            chart_spec = {}
+            
             try:
-                # Parse cấu hình JSON của AI
-                chart_spec = json.loads(json_blocks[0].strip())
-                c_type = chart_spec.get("type", "none")
+                # Cố gắng dọn dẹp JSON bẩn trước khi parse (vd dư dấu phẩy)
+                clean_json = re.sub(r",\s*}", "}", raw_json)
+                chart_spec = json.loads(clean_json)
+            except json.JSONDecodeError:
+                # FALLBACK BẤT TỬ: Nếu JSON hỏng, dùng Regex bóc tay từng trường dữ liệu!
+                type_match = re.search(r'["\']type["\']\s*:\s*["\']([^"\']+)["\']', raw_json)
+                x_match = re.search(r'["\']x["\']\s*:\s*["\']([^"\']+)["\']', raw_json)
+                y_match = re.search(r'["\']y["\']\s*:\s*["\']([^"\']+)["\']', raw_json)
+                title_match = re.search(r'["\']title["\']\s*:\s*["\']([^"\']+)["\']', raw_json)
                 
-                if c_type != "none":
-                    x_col = chart_spec.get("x")
-                    y_col = chart_spec.get("y")
-                    title = chart_spec.get("title", "Biểu đồ Phân tích")
-                    
+                chart_spec = {
+                    "type": type_match.group(1) if type_match else "none",
+                    "x": x_match.group(1) if x_match else None,
+                    "y": y_match.group(1) if y_match else None,
+                    "title": title_match.group(1) if title_match else "Biểu đồ Phân tích"
+                }
+
+            c_type = chart_spec.get("type", "none")
+            if c_type != "none":
+                x_col = chart_spec.get("x")
+                y_col = chart_spec.get("y")
+                title = chart_spec.get("title", "Biểu đồ Phân tích")
+                
+                try:
                     if c_type == "bar":
                         st.plotly_chart(px.bar(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
                     elif c_type == "pie":
@@ -368,10 +385,8 @@ def render_assistant_response(answer, audit_logs=None):
                         st.plotly_chart(px.line(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
                     elif c_type == "scatter":
                         st.plotly_chart(px.scatter(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
-            except json.JSONDecodeError as e:
-                st.warning(f"⚠️ **Không thể vẽ biểu đồ do AI định dạng JSON lỗi:** {e}")
-            except Exception as e:
-                st.warning(f"⚠️ **Không thể vẽ biểu đồ do cột dữ liệu không khớp:** {e}")
+                except Exception as e:
+                    st.warning(f"⚠️ **Không thể vẽ biểu đồ do cột dữ liệu {x_col} hoặc {y_col} không khớp kết quả SQL:** {e}")
             
     with tab2:
         st.markdown(chien_luoc)
