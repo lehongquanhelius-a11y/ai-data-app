@@ -1,4 +1,4 @@
-import streamlit as st
+=import streamlit as st
 from langchain_community.utilities import SQLDatabase
 from langchain_groq import ChatGroq
 from langchain_community.agent_toolkits import create_sql_agent
@@ -257,8 +257,8 @@ def get_agent():
         db_uri = get_db_uri()
         db = SQLDatabase.from_uri(db_uri)
         
-        # Sử dụng Groq Llama 3
-        llm = ChatGroq(model_name="llama3-70b-8192", groq_api_key=api_key, temperature=0.1)
+        # Đã cập nhật lên model Llama 3.1 mới nhất được Groq hỗ trợ
+        llm = ChatGroq(model_name="llama-3.1-70b-versatile", groq_api_key=api_key, temperature=0.1)
         
         agent_executor = create_sql_agent(
             llm=llm, 
