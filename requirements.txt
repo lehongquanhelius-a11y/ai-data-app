@@ -7,3 +7,6 @@ pymysql
 pandas
 matplotlib
 seaborn
+langchain-groq
+groq
+plotly
