@@ -9,6 +9,7 @@ import json
 import os
 import uuid
 import sqlite3
+import textwrap
 
 # ==========================================
 # 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE (ĐỌC CSV BẤT TỬ)
@@ -21,7 +22,6 @@ def init_sqlite_db():
     conn = sqlite3.connect("ecommerce.db", check_same_thread=False)
     cursor = conn.cursor()
     
-    # Kiểm tra xem bảng đã có chưa
     cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='df_orders'")
     has_table = cursor.fetchone()[0] > 0
     
@@ -34,7 +34,6 @@ def init_sqlite_db():
             
     if needs_update:
         try:
-            # BỌC THÉP CSV: Tự nhận diện dấy phẩy/chấm phẩy (sep=None), lờ đi dòng lỗi (on_bad_lines='skip')
             read_opts = {'sep': None, 'engine': 'python', 'on_bad_lines': 'skip', 'encoding': 'utf-8'}
             
             df_customers = pd.read_csv("df_Customers.csv", **read_opts)
@@ -53,7 +52,6 @@ def init_sqlite_db():
     conn.close()
     return True
 
-# Chạy hàm khởi tạo Database
 init_sqlite_db()
 
 # ==========================================
@@ -185,15 +183,17 @@ Bạn là Giám đốc Vận hành (COO) & Kỹ sư Dữ liệu cấp cao tại 
 # QUY TRÌNH VẬN HÀNH BẮT BUỘC (SOP)
 1. TÌM KIẾM SỰ THẬT: BẠN BẮT BUỘC phải dùng công cụ sql_db_query để truy vấn CSDL. TUYỆT ĐỐI KHÔNG tự bịa số liệu.
 2. NỐI BẢNG: Luôn dùng df_orders làm trung tâm. Tính doanh thu bằng SUM(payment_value), loại trừ đơn Cancelled.
+3. KHỬ TRÙNG LẶP (ANTI-DUPLICATE): Dữ liệu đang có lỗi nhân bản dòng (Duplicates). BẠN BẮT BUỘC phải xử lý bằng cách dùng từ khóa DISTINCT (ví dụ: COUNT(DISTINCT order_id)) để đảm bảo số liệu không bị x2, x3.
 
 # ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (FINAL ANSWER):
 Khi bạn đã có kết quả cuối cùng, bạn BẮT BUỘC phải bắt đầu bằng cụm từ "Final Answer: " sau đó mới đến các thẻ. Không được thiếu thẻ nào.
 
 Final Answer:
 [BIỂU ĐỒ]
-(BẮT BUỘC gộp toàn bộ code khai báo dữ liệu và vẽ biểu đồ vào DUY NHẤT 1 khối '''python. TUYỆT ĐỐI KHÔNG chia nhỏ thành nhiều khối!)
+(BẮT BUỘC LUÔN LUÔN sinh code Python để vẽ biểu đồ trực quan minh họa cho mọi dữ liệu thống kê, phân tích, insight. BẠN PHẢI CHỦ ĐỘNG VẼ BIỂU ĐỒ NGAY CẢ KHI NGƯỜI DÙNG KHÔNG YÊU CẦU!
+Gộp toàn bộ code streamlit, matplotlib, seaborn vào DUY NHẤT 1 khối '''python. TUYỆT ĐỐI KHÔNG chia nhỏ thành nhiều khối!)
 '''python
-# code streamlit, matplotlib gom hết vào đây
+# code vẽ biểu đồ đặt hết vào đây
 '''
 
 [PHÂN TÍCH]
@@ -233,17 +233,29 @@ def run_data_audit(db_uri):
     engine = create_engine(db_uri)
     audit_logs = []
     try:
+        # Check Âm
         df_pay = pd.read_sql("SELECT order_id, payment_value FROM df_payments WHERE payment_value < 0", engine)
         if not df_pay.empty:
-            audit_logs.append({"status": "error", "msg": f"❌ df_payments: Phát hiện {len(df_pay)} giao dịch có giá trị âm (Lỗi hệ thống ghi nhận)."})
+            audit_logs.append({"status": "error", "msg": f"❌ df_payments: Phát hiện {len(df_pay)} giao dịch có giá trị âm."})
         else:
-            audit_logs.append({"status": "success", "msg": "✅ df_payments: 100% giao dịch có giá trị dương hợp lệ."})
+            audit_logs.append({"status": "success", "msg": "✅ df_payments: 100% giao dịch hợp lệ."})
             
+        # Check Null
         df_ord = pd.read_sql("SELECT order_id FROM df_orders WHERE order_status IS NULL OR order_status = ''", engine)
         if not df_ord.empty:
-            audit_logs.append({"status": "warning", "msg": f"⚠️ df_orders: Phát hiện {len(df_ord)} đơn hàng bị trống (Null) trạng thái."})
+            audit_logs.append({"status": "warning", "msg": f"⚠️ df_orders: Phát hiện {len(df_ord)} đơn hàng bị trống trạng thái."})
         else:
-            audit_logs.append({"status": "success", "msg": "✅ df_orders: Toàn vẹn dữ liệu trạng thái đơn hàng."})
+            audit_logs.append({"status": "success", "msg": "✅ df_orders: Toàn vẹn dữ liệu."})
+            
+        # 🌟 TÍNH NĂNG MỚI: Quét và ép AI khử trùng lặp (Anti-Duplicates)
+        df_dup_ord = pd.read_sql("SELECT order_id FROM df_orders GROUP BY order_id HAVING COUNT(order_id) > 1", engine)
+        df_dup_cus = pd.read_sql("SELECT customer_id FROM df_customers GROUP BY customer_id HAVING COUNT(customer_id) > 1", engine)
+        total_dups = len(df_dup_ord) + len(df_dup_cus)
+        
+        if total_dups > 0:
+            audit_logs.append({"status": "warning", "msg": f"⚠️ Cảnh báo rác dữ liệu: Phát hiện {total_dups} ID bị nhân bản dòng (Duplicates). Đã kích hoạt lệnh ép AI dùng kỹ năng khử trùng lặp (DISTINCT) để đảm bảo số liệu chính xác tuyệt đối."})
+        else:
+            audit_logs.append({"status": "success", "msg": "✅ Dữ liệu định danh: Sạch sẽ, không phát hiện lỗi nhân bản dòng (Duplicates)."})
             
     except Exception as e:
         audit_logs.append({"status": "warning", "msg": f"⚠️ Bỏ qua kiểm định sâu do CSDL chưa khởi tạo đầy đủ."})
@@ -305,8 +317,9 @@ def render_assistant_response(answer, audit_logs=None):
 
     if code_blocks:
         combined_code = "\n".join(code_blocks)
+        clean_code = textwrap.dedent(combined_code).strip()
         try:
-            exec(combined_code)
+            exec(clean_code)
         except Exception as e:
             st.warning(f"Không thể hiển thị biểu đồ: {e}")
 
