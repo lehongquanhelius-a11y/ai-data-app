@@ -12,7 +12,7 @@ import sqlite3
 import textwrap
 
 # ==========================================
-# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE (ĐỌC CSV BẤT TỬ)
+# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE
 # ==========================================
 DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
 DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
@@ -173,39 +173,30 @@ instructions_raw = """
 # VAI TRÒ
 Bạn là Giám đốc Vận hành (COO) & Kỹ sư Dữ liệu cấp cao tại một E-commerce Marketplace.
 
-# BẢN ĐỒ CƠ SỞ DỮ LIỆU
-- df_orders: Bảng trung tâm. (order_id, customer_id, order_status).
-- df_customers: (customer_id, customer_city). Join với df_orders qua customer_id.
-- df_payments: (order_id, payment_value). Join với df_orders qua order_id.
-- df_products: (product_id, product_category_name).
-- df_orderitems: (order_id, product_id, price). Join df_orders qua order_id, df_products qua product_id.
-
 # QUY TRÌNH VẬN HÀNH BẮT BUỘC (SOP)
 1. TÌM KIẾM SỰ THẬT: BẠN BẮT BUỘC phải dùng công cụ sql_db_query để truy vấn CSDL. TUYỆT ĐỐI KHÔNG tự bịa số liệu.
 2. NỐI BẢNG: Luôn dùng df_orders làm trung tâm. Tính doanh thu bằng SUM(payment_value), loại trừ đơn Cancelled.
-3. KHỬ TRÙNG LẶP (ANTI-DUPLICATE): Dữ liệu đang có lỗi nhân bản dòng (Duplicates). BẠN BẮT BUỘC phải xử lý bằng cách dùng từ khóa DISTINCT (ví dụ: COUNT(DISTINCT order_id)) để đảm bảo số liệu không bị x2, x3.
+3. KHỬ TRÙNG LẶP: Dùng từ khóa DISTINCT (ví dụ: COUNT(DISTINCT order_id)) để đảm bảo số liệu không bị x2, x3.
 
 # ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (FINAL ANSWER):
-Khi bạn đã có kết quả cuối cùng, bạn BẮT BUỘC phải bắt đầu bằng cụm từ "Final Answer: " sau đó mới đến các thẻ. Không được thiếu thẻ nào.
+Khi bạn đã có kết quả cuối cùng, bạn BẮT BUỘC phải bắt đầu bằng cụm từ "Final Answer: " sau đó mới đến các thẻ.
 
 Final Answer:
 [BIỂU ĐỒ]
-(BẮT BUỘC LUÔN LUÔN sinh code Python để vẽ biểu đồ trực quan minh họa cho mọi dữ liệu thống kê, phân tích, insight. BẠN PHẢI CHỦ ĐỘNG VẼ BIỂU ĐỒ NGAY CẢ KHI NGƯỜI DÙNG KHÔNG YÊU CẦU!
-Gộp toàn bộ code streamlit, matplotlib, seaborn vào DUY NHẤT 1 khối '''python. TUYỆT ĐỐI KHÔNG chia nhỏ thành nhiều khối!)
+(BẮT BUỘC CHỦ ĐỘNG VẼ BIỂU ĐỒ MINH HỌA CHO INSIGHT. 
+⚠️ LUẬT VẼ BIỂU ĐỒ: BẠN PHẢI TỰ HARDCODE DỮ LIỆU ĐÃ TRUY VẤN ĐƯỢC VÀO PANDAS DATAFRAME TRONG ĐOẠN CODE NÀY. TUYỆT ĐỐI KHÔNG DÙNG THƯ VIỆN KẾT NỐI DATABASE BÊN TRONG CODE PYTHON NÀY ĐỂ TRÁNH TREO MÁY!
+Gộp toàn bộ code streamlit (st.bar_chart, st.line_chart...) vào DUY NHẤT 1 khối '''python)
 '''python
-# code vẽ biểu đồ đặt hết vào đây
+import pandas as pd
+import streamlit as st
+# Tạo dataframe từ số liệu thô và vẽ biểu đồ tại đây
 '''
 
 [PHÂN TÍCH]
-(Trình bày phân tích bằng Markdown sắc nét, chia làm 2 ý rõ ràng:
-1. Insight cơ bản: Đọc vị các con số tổng quan, xu hướng chính, phân bổ tỷ trọng bề nổi.
-2. Insight nghịch lý/chuyên sâu: Phát hiện điểm bất thường, rủi ro ngầm, hoặc cơ hội ẩn giấu đằng sau những con số đó.)
+(Trình bày phân tích bằng Markdown sắc nét, chia làm 2 ý rõ ràng: Insight cơ bản và Insight chuyên sâu)
 
 [CHIẾN LƯỢC]
-(BẮT BUỘC trình bày bằng Bullet Points, chia thành 3 mục rõ ràng dựa trên insight:
-* Chiến lược Ngắn hạn (Cấp bách): ...
-* Chiến lược Trung hạn: ...
-* Chiến lược Dài hạn: ...)
+(Trình bày bằng Bullet Points: Ngắn hạn, Trung hạn, Dài hạn)
 
 [SQL]
 '''sql
@@ -233,29 +224,26 @@ def run_data_audit(db_uri):
     engine = create_engine(db_uri)
     audit_logs = []
     try:
-        # Check Âm
         df_pay = pd.read_sql("SELECT order_id, payment_value FROM df_payments WHERE payment_value < 0", engine)
         if not df_pay.empty:
             audit_logs.append({"status": "error", "msg": f"❌ df_payments: Phát hiện {len(df_pay)} giao dịch có giá trị âm."})
         else:
             audit_logs.append({"status": "success", "msg": "✅ df_payments: 100% giao dịch hợp lệ."})
             
-        # Check Null
         df_ord = pd.read_sql("SELECT order_id FROM df_orders WHERE order_status IS NULL OR order_status = ''", engine)
         if not df_ord.empty:
             audit_logs.append({"status": "warning", "msg": f"⚠️ df_orders: Phát hiện {len(df_ord)} đơn hàng bị trống trạng thái."})
         else:
             audit_logs.append({"status": "success", "msg": "✅ df_orders: Toàn vẹn dữ liệu."})
             
-        # 🌟 TÍNH NĂNG MỚI: Quét và ép AI khử trùng lặp (Anti-Duplicates)
         df_dup_ord = pd.read_sql("SELECT order_id FROM df_orders GROUP BY order_id HAVING COUNT(order_id) > 1", engine)
         df_dup_cus = pd.read_sql("SELECT customer_id FROM df_customers GROUP BY customer_id HAVING COUNT(customer_id) > 1", engine)
         total_dups = len(df_dup_ord) + len(df_dup_cus)
         
         if total_dups > 0:
-            audit_logs.append({"status": "warning", "msg": f"⚠️ Cảnh báo rác dữ liệu: Phát hiện {total_dups} ID bị nhân bản dòng (Duplicates). Đã kích hoạt lệnh ép AI dùng kỹ năng khử trùng lặp (DISTINCT) để đảm bảo số liệu chính xác tuyệt đối."})
+            audit_logs.append({"status": "warning", "msg": f"⚠️ Cảnh báo rác dữ liệu: Phát hiện {total_dups} ID bị nhân bản dòng (Duplicates). Kích hoạt lệnh ép AI dùng DISTINCT."})
         else:
-            audit_logs.append({"status": "success", "msg": "✅ Dữ liệu định danh: Sạch sẽ, không phát hiện lỗi nhân bản dòng (Duplicates)."})
+            audit_logs.append({"status": "success", "msg": "✅ Dữ liệu định danh: Sạch sẽ, không phát hiện lỗi nhân bản dòng."})
             
     except Exception as e:
         audit_logs.append({"status": "warning", "msg": f"⚠️ Bỏ qua kiểm định sâu do CSDL chưa khởi tạo đầy đủ."})
@@ -289,42 +277,59 @@ def get_agent():
         return None, str(e)
 
 # ==========================================
-# 6. GIAO DIỆN HIỂN THỊ
+# 6. GIAO DIỆN HIỂN THỊ (BẢN CẤP CỨU CHỐNG LỖI)
 # ==========================================
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
-    regex_python = tick3 + r'python(.*?)' + tick3
-    code_blocks = re.findall(regex_python, answer, re.DOTALL)
-    
-    regex_sql = tick3 + r'sql(.*?)' + tick3
-    raw_sql_blocks = re.findall(regex_sql, answer, re.DOTALL | re.IGNORECASE)
-    
+    # --- TRÍCH XUẤT CODE PYTHON & SQL CỰC AN TOÀN ---
+    code_blocks = []
+    raw_py_blocks = re.findall(fr'{tick3}python\s*(.*?){tick3}', answer, re.DOTALL | re.IGNORECASE)
+    for b in raw_py_blocks:
+        code_blocks.append(b)
+
     sql_blocks = []
+    raw_sql_blocks = re.findall(fr'{tick3}sql\s*(.*?){tick3}', answer, re.DOTALL | re.IGNORECASE)
     for s in raw_sql_blocks:
         s_clean = s.strip()
         if s_clean and s_clean not in sql_blocks:
             sql_blocks.append(s_clean)
-    
-    phan_tich = "Hệ thống đã phân tích xong nhưng đầu ra bị sai định dạng hiển thị. Vui lòng thử lại."
-    chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược. Vui lòng bấm 'Chat Mới' và hỏi lại."
+            
+    # --- THUẬT TOÁN BÓC TÁCH VĂN BẢN THÔNG MINH (CHỐNG MẤT CHỮ) ---
+    phan_tich = answer # Mặc định lấy toàn bộ câu trả lời làm Phân tích (chống mất chữ)
+    chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược hoặc chiến lược đã được gộp chung ở Tab Báo cáo Phân tích."
     
     if "[PHÂN TÍCH]" in answer:
-        phan_tich = answer.split("[PHÂN TÍCH]")[1].split("[")[0].strip()
-        
+        try:
+            phan_tich = answer.split("[PHÂN TÍCH]")[-1].split("[CHIẾN LƯỢC]")[0].split("[SQL]")[0].strip()
+        except:
+            pass
+            
     if "[CHIẾN LƯỢC]" in answer:
-        chien_luoc = answer.split("[CHIẾN LƯỢC]")[1].split("[")[0].strip()
+        try:
+            chien_luoc = answer.split("[CHIẾN LƯỢC]")[-1].split("[SQL]")[0].split("[PHÂN TÍCH]")[0].strip()
+        except:
+            pass
+            
+    # Dọn dẹp rác Markdown khỏi Tab 1 nếu AI quên viết thẻ [PHÂN TÍCH]
+    if phan_tich == answer:
+        phan_tich = re.sub(fr'{tick3}.*?{tick3}', '', phan_tich, flags=re.DOTALL)
+        phan_tich = phan_tich.replace("Final Answer:", "").replace("[BIỂU ĐỒ]", "").strip()
 
+    # --- THỰC THI BIỂU ĐỒ (BỌC THÉP TRY-CATCH HIỆN RÕ LỖI) ---
     if code_blocks:
         combined_code = "\n".join(code_blocks)
         clean_code = textwrap.dedent(combined_code).strip()
-        try:
-            exec(clean_code)
-        except Exception as e:
-            st.warning(f"Không thể hiển thị biểu đồ: {e}")
+        if clean_code:
+            try:
+                # Cấp sẵn thư viện vào bộ nhớ để AI không bị lỗi NameError
+                exec_globals = {'st': st, 'pd': pd}
+                exec(clean_code, exec_globals)
+            except Exception as e:
+                st.warning(f"⚠️ **AI viết code vẽ biểu đồ bị lỗi cú pháp:** {e}\n\n*Code gốc của AI (Dành cho Debug):*\n```python\n{clean_code}\n```")
 
     st.markdown("---")
-    st.markdown("💡 **Hệ thống AI đã bóc tách thành công các Insight chuyên sâu từ CSDL. Xem chi tiết tại các tab bên dưới.**")
+    st.markdown("💡 **Hệ thống AI đã bóc tách thành công Insight từ CSDL. Xem chi tiết tại các tab bên dưới.**")
     
     if audit_logs:
         with st.expander("🔍 Biên bản Kiểm định Dữ liệu (Auto-Audit Workflow)", expanded=False):
@@ -341,7 +346,7 @@ def render_assistant_response(answer, audit_logs=None):
     tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Đề xuất Chiến lược", "⚙️ Tiến trình SQL"])
     
     with tab1:
-        st.markdown(phan_tich if "[PHÂN TÍCH]" in answer else answer)
+        st.markdown(phan_tich if phan_tich else "Không tìm thấy nội dung phân tích.")
             
     with tab2:
         st.markdown(chien_luoc)
@@ -351,7 +356,6 @@ def render_assistant_response(answer, audit_logs=None):
             st.markdown("**Câu lệnh SQL đã được Agent thực thi:**")
             for sql in sql_blocks:
                 st.code(sql, language="sql")
-                
                 st.markdown("**🗄️ Bảng kết quả truy xuất (Data Preview):**")
                 if "SELECT" in sql.upper():
                     try:
@@ -376,7 +380,7 @@ for msg in current_messages:
         with st.chat_message("assistant"):
             render_assistant_response(msg["content"])
 
-if prompt := st.chat_input("VD: Đếm số lượng đơn hàng..."):
+if prompt := st.chat_input("VD: Cho tôi insights về địa lý..."):
     st.session_state.all_chats[st.session_state.current_session_id].append({"role": "user", "content": prompt})
     save_history(st.session_state.all_chats)
     
