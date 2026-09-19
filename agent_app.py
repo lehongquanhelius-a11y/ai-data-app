@@ -1,4 +1,4 @@
-=import streamlit as st
+import streamlit as st
 from langchain_community.utilities import SQLDatabase
 from langchain_groq import ChatGroq
 from langchain_community.agent_toolkits import create_sql_agent
