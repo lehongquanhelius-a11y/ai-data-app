@@ -12,7 +12,7 @@ import sqlite3
 import textwrap
 
 # ==========================================
-# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE
+# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE (ĐỌC CSV BẤT TỬ)
 # ==========================================
 DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
 DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
@@ -184,11 +184,13 @@ Khi bạn đã có kết quả cuối cùng, bạn BẮT BUỘC phải bắt đ�
 Final Answer:
 [BIỂU ĐỒ]
 (BẮT BUỘC CHỦ ĐỘNG VẼ BIỂU ĐỒ MINH HỌA CHO INSIGHT. 
-⚠️ LUẬT VẼ BIỂU ĐỒ: BẠN PHẢI TỰ HARDCODE DỮ LIỆU ĐÃ TRUY VẤN ĐƯỢC VÀO PANDAS DATAFRAME TRONG ĐOẠN CODE NÀY. TUYỆT ĐỐI KHÔNG DÙNG THƯ VIỆN KẾT NỐI DATABASE BÊN TRONG CODE PYTHON NÀY ĐỂ TRÁNH TREO MÁY!
+⚠️ LUẬT VẼ BIỂU ĐỒ: BẠN PHẢI TỰ HARDCODE DỮ LIỆU ĐÃ TRUY VẤN ĐƯỢC VÀO PANDAS DATAFRAME TRONG ĐOẠN CODE NÀY. TUYỆT ĐỐI KHÔNG CHÈN THÊM BẤT KỲ CÂU TIẾNG ANH NÀO VÀO TRONG CODE.
 Gộp toàn bộ code streamlit (st.bar_chart, st.line_chart...) vào DUY NHẤT 1 khối '''python)
 '''python
 import pandas as pd
 import streamlit as st
+import matplotlib.pyplot as plt
+import seaborn as sns
 # Tạo dataframe từ số liệu thô và vẽ biểu đồ tại đây
 '''
 
@@ -295,8 +297,8 @@ def render_assistant_response(answer, audit_logs=None):
         if s_clean and s_clean not in sql_blocks:
             sql_blocks.append(s_clean)
             
-    # --- THUẬT TOÁN BÓC TÁCH VĂN BẢN THÔNG MINH (CHỐNG MẤT CHỮ) ---
-    phan_tich = answer # Mặc định lấy toàn bộ câu trả lời làm Phân tích (chống mất chữ)
+    # --- THUẬT TOÁN BÓC TÁCH VĂN BẢN THÔNG MINH ---
+    phan_tich = answer
     chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược hoặc chiến lược đã được gộp chung ở Tab Báo cáo Phân tích."
     
     if "[PHÂN TÍCH]" in answer:
@@ -311,22 +313,30 @@ def render_assistant_response(answer, audit_logs=None):
         except:
             pass
             
-    # Dọn dẹp rác Markdown khỏi Tab 1 nếu AI quên viết thẻ [PHÂN TÍCH]
     if phan_tich == answer:
         phan_tich = re.sub(fr'{tick3}.*?{tick3}', '', phan_tich, flags=re.DOTALL)
         phan_tich = phan_tich.replace("Final Answer:", "").replace("[BIỂU ĐỒ]", "").strip()
 
-    # --- THỰC THI BIỂU ĐỒ (BỌC THÉP TRY-CATCH HIỆN RÕ LỖI) ---
+    # --- THỰC THI BIỂU ĐỒ (LỌC SẠCH RÁC TIẾNG ANH TRONG CODE) ---
     if code_blocks:
         combined_code = "\n".join(code_blocks)
-        clean_code = textwrap.dedent(combined_code).strip()
+        
+        # LỌC RÁC: Xóa ngay lập tức mọi dòng bắt đầu bằng dấu "..." hoặc có chứa chữ "EXACTLY ONE python code block"
+        clean_lines = []
+        for line in combined_code.split('\n'):
+            if not line.strip().startswith('...') and "EXACTLY ONE python code block" not in line:
+                clean_lines.append(line)
+        
+        clean_code = "\n".join(clean_lines)
+        clean_code = textwrap.dedent(clean_code).strip()
+        
         if clean_code:
             try:
-                # Cấp sẵn thư viện vào bộ nhớ để AI không bị lỗi NameError
-                exec_globals = {'st': st, 'pd': pd}
+                # Import đầy đủ thư viện để phòng ngừa lỗi
+                exec_globals = {'st': st, 'pd': pd, 'plt': __import__('matplotlib.pyplot').pyplot, 'sns': __import__('seaborn')}
                 exec(clean_code, exec_globals)
             except Exception as e:
-                st.warning(f"⚠️ **AI viết code vẽ biểu đồ bị lỗi cú pháp:** {e}\n\n*Code gốc của AI (Dành cho Debug):*\n```python\n{clean_code}\n```")
+                st.warning(f"⚠️ **AI viết code vẽ biểu đồ bị lỗi:** {e}\n\n*Code gốc của AI (Dành cho Debug):*\n```python\n{clean_code}\n```")
 
     st.markdown("---")
     st.markdown("💡 **Hệ thống AI đã bóc tách thành công Insight từ CSDL. Xem chi tiết tại các tab bên dưới.**")
