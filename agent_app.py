@@ -167,7 +167,7 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 3. BỘ NÃO CHIẾN LƯỢC (TÍCH HỢP BIỂU ĐỒ V2)
+# 3. BỘ NÃO CHIẾN LƯỢC (TÍCH HỢP BIỂU ĐỒ - DÙNG CHUỖI ĐƠN GIẢN)
 # ==========================================
 instructions_raw = """
 # VAI TRÒ
@@ -183,15 +183,10 @@ Khi bạn đã có kết quả cuối cùng, bạn BẮT BUỘC phải bắt đ�
 
 Final Answer:
 [BIỂU ĐỒ]
-(BẮT BUỘC cấu hình biểu đồ theo định dạng JSON bên dưới. TUYỆT ĐỐI KHÔNG VIẾT CODE PYTHON, TUYỆT ĐỐI KHÔNG VIẾT COMMENT DẠNG // TRONG JSON. Hãy trả về JSON chuẩn xác nằm trong khối '''json)
-'''json
-{
-    "type": "bar",
-    "x": "tên_cột_x",
-    "y": "tên_cột_y",
-    "title": "Tiêu đề biểu đồ"
-}
-'''
+(BẮT BUỘC viết đúng 1 dòng cấu hình biểu đồ theo định dạng chuỗi sau. TUYỆT ĐỐI KHÔNG DÙNG JSON, KHÔNG VIẾT CODE PYTHON).
+Định dạng: [CHART:loại_biểu_đồ|tên_cột_x|tên_cột_y|tiêu_đề]
+(Ví dụ: [CHART:bar|product_category|total_revenue|Doanh thu theo danh mục])
+(Ghi chú: loại_biểu_đồ chỉ được chọn 1 trong: bar, line, pie, scatter. Tên cột x và y BẮT BUỘC phải nằm trong lệnh SQL bên dưới).
 
 [PHÂN TÍCH]
 (Trình bày phân tích bằng Markdown sắc nét, chia làm 2 ý rõ ràng: Insight cơ bản và Insight chuyên sâu)
@@ -280,13 +275,23 @@ def get_agent():
         return None, str(e)
 
 # ==========================================
-# 6. GIAO DIỆN HIỂN THỊ (BẢN TÍCH HỢP PLOTLY V2)
+# 6. GIAO DIỆN HIỂN THỊ (BẢN PLOTLY CHỐNG LỖI)
 # ==========================================
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.replace("`", "") if answer.startswith("`") else answer
     
-    # --- TRÍCH XUẤT JSON (V2) & SQL ---
-    json_blocks = re.findall(fr'{tick3}json\s*(.*?){tick3}', answer, re.DOTALL | re.IGNORECASE)
+    # --- TRÍCH XUẤT CẤU HÌNH BIỂU ĐỒ BẰNG CHUỖI ---
+    chart_match = re.search(r'\[CHART:(.*?)\]', answer)
+    chart_spec = None
+    if chart_match:
+        parts = chart_match.group(1).split('|')
+        if len(parts) >= 3:
+            chart_spec = {
+                "type": parts[0].strip(),
+                "x": parts[1].strip(),
+                "y": parts[2].strip(),
+                "title": parts[3].strip() if len(parts) > 3 else "Biểu đồ Phân tích"
+            }
     
     sql_blocks = []
     raw_sql_blocks = re.findall(fr'{tick3}sql\s*(.*?){tick3}', answer, re.DOTALL | re.IGNORECASE)
@@ -314,6 +319,8 @@ def render_assistant_response(answer, audit_logs=None):
     if phan_tich == answer:
         phan_tich = re.sub(fr'{tick3}.*?{tick3}', '', phan_tich, flags=re.DOTALL)
         phan_tich = phan_tich.replace("Final Answer:", "").replace("[BIỂU ĐỒ]", "").strip()
+        # Ẩn đi thẻ CHART gốc trong văn bản phân tích
+        phan_tich = re.sub(r'\[CHART:.*?\]', '', phan_tich).strip()
 
     st.markdown("---")
     st.markdown("💡 **Hệ thống AI đã bóc tách thành công Insight từ CSDL. Xem chi tiết tại các tab bên dưới.**")
@@ -346,35 +353,15 @@ def render_assistant_response(answer, audit_logs=None):
     with tab1:
         st.markdown(phan_tich if phan_tich else "Không tìm thấy nội dung phân tích.")
         
-        # VẼ BIỂU ĐỒ BẰNG CƠ CHẾ PLOTLY V2 (VỚI BỘ LỌC JSON BẤT TỬ)
-        if df_preview is not None and not df_preview.empty and json_blocks:
+        # VẼ BIỂU ĐỒ BẰNG CƠ CHẾ PLOTLY MỚI (TỪ CHUỖI)
+        if df_preview is not None and not df_preview.empty and chart_spec:
             st.markdown("---")
-            raw_json = json_blocks[0].strip()
-            chart_spec = {}
-            
-            try:
-                # Cố gắng dọn dẹp JSON bẩn trước khi parse (vd dư dấu phẩy)
-                clean_json = re.sub(r",\s*}", "}", raw_json)
-                chart_spec = json.loads(clean_json)
-            except json.JSONDecodeError:
-                # FALLBACK BẤT TỬ: Nếu JSON hỏng, dùng Regex bóc tay từng trường dữ liệu!
-                type_match = re.search(r'["\']type["\']\s*:\s*["\']([^"\']+)["\']', raw_json)
-                x_match = re.search(r'["\']x["\']\s*:\s*["\']([^"\']+)["\']', raw_json)
-                y_match = re.search(r'["\']y["\']\s*:\s*["\']([^"\']+)["\']', raw_json)
-                title_match = re.search(r'["\']title["\']\s*:\s*["\']([^"\']+)["\']', raw_json)
-                
-                chart_spec = {
-                    "type": type_match.group(1) if type_match else "none",
-                    "x": x_match.group(1) if x_match else None,
-                    "y": y_match.group(1) if y_match else None,
-                    "title": title_match.group(1) if title_match else "Biểu đồ Phân tích"
-                }
-
             c_type = chart_spec.get("type", "none")
+            
             if c_type != "none":
                 x_col = chart_spec.get("x")
                 y_col = chart_spec.get("y")
-                title = chart_spec.get("title", "Biểu đồ Phân tích")
+                title = chart_spec.get("title")
                 
                 try:
                     if c_type == "bar":
