@@ -1,6 +1,6 @@
 import streamlit as st
 from langchain_community.utilities import SQLDatabase
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.agent_toolkits import create_sql_agent
 import re
 import pandas as pd
@@ -119,8 +119,8 @@ with st.sidebar:
             st.rerun()
     with col2:
         with st.popover("⚙️ Cấu hình"):
-            groq_api_key = st.text_input("Groq API Key:", type="password", key="api_key")
-            st.markdown("[👉 Lấy API Key tại đây](https://console.groq.com/keys)")
+            gemini_api_key = st.text_input("Gemini API Key:", type="password", key="api_key")
+            st.markdown("[👉 Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
             st.markdown("---")
             st.caption("Để trống MySQL nếu muốn dùng file ecommerce.db (Mặc định)")
             mysql_host = st.text_input("MySQL Host:", key="db_host")
@@ -167,7 +167,7 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 3. BỘ NÃO CHIẾN LƯỢC (TÍCH HỢP BIỂU ĐỒ - DÙNG CHUỖI ĐƠN GIẢN)
+# 3. BỘ NÃO CHIẾN LƯỢC (TÍCH HỢP BIỂU ĐỒ CHUỖI PLOTLY)
 # ==========================================
 instructions_raw = """
 # VAI TRÒ
@@ -247,18 +247,18 @@ def run_data_audit(db_uri):
     return audit_logs
 
 # ==========================================
-# 5. KHỞI TẠO TÁC NHÂN GROQ
+# 5. KHỞI TẠO TÁC NHÂN GEMINI 3.6 FLASH
 # ==========================================
 def get_agent():
     api_key = st.session_state.get("api_key", "")
     if not api_key:
-        return None, "Vui lòng nhập Groq API Key trong mục ⚙️ Cấu hình."
+        return None, "Vui lòng nhập Gemini API Key trong mục ⚙️ Cấu hình."
     try:
         db_uri = get_db_uri()
         db = SQLDatabase.from_uri(db_uri)
         
-        # Đã cập nhật lên model Llama 3.3 mới nhất được Groq hỗ trợ
-        llm = ChatGroq(model_name="llama-3.3-70b-versatile", groq_api_key=api_key, temperature=0.1)
+        # Gọi chính xác model mà sếp yêu cầu
+        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
         
         agent_executor = create_sql_agent(
             llm=llm, 
@@ -300,7 +300,7 @@ def render_assistant_response(answer, audit_logs=None):
         if s_clean and s_clean not in sql_blocks:
             sql_blocks.append(s_clean)
             
-    # --- BÓC TÁCH VĂN BẢN V1 ---
+    # --- BÓC TÁCH VĂN BẢN ---
     phan_tich = answer
     chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược hoặc chiến lược đã được gộp chung ở Tab Báo cáo Phân tích."
     
@@ -353,7 +353,7 @@ def render_assistant_response(answer, audit_logs=None):
     with tab1:
         st.markdown(phan_tich if phan_tich else "Không tìm thấy nội dung phân tích.")
         
-        # VẼ BIỂU ĐỒ BẰNG CƠ CHẾ PLOTLY MỚI (TỪ CHUỖI)
+        # VẼ BIỂU ĐỒ PLOTLY
         if df_preview is not None and not df_preview.empty and chart_spec:
             st.markdown("---")
             c_type = chart_spec.get("type", "none")
@@ -416,7 +416,7 @@ if prompt := st.chat_input("VD: Cho tôi insights về địa lý..."):
             with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
                 current_audit = run_data_audit(get_db_uri())
                 
-            with st.spinner("Agent đang phân tích và lên biểu đồ với tốc độ của Groq..."):
+            with st.spinner("Agent đang phân tích và lên biểu đồ với Gemini..."):
                 try:
                     response = agent.invoke({"input": prompt})
                     answer = response["output"]
