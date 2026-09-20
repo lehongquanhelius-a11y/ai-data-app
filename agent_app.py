@@ -158,7 +158,7 @@ with st.sidebar:
 # ==========================================
 # 4. BỘ NÃO CHIẾN LƯỢC & PROMPT
 # ==========================================
-instructions = """
+instructions_raw = """
 Bạn là Kỹ sư Dữ liệu cấp cao. 
 1. BẮT BUỘC dùng tool để chạy SQL lấy kết quả thực tế. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
 2. Trả lời cuối cùng BẮT BUỘC phải theo đúng cấu trúc sau:
@@ -174,5 +174,177 @@ Bạn là Kỹ sư Dữ liệu cấp cao.
 - Đề xuất 2-3 hành động cụ thể để cải thiện.
 
 [SQL]
-```sql
+'''sql
 -- Dán câu SQL đã chạy thành công vào đây
+'''
+"""
+instructions = instructions_raw.replace("'''", "```")
+
+def get_db_uri():
+    host = st.session_state.get("db_host", "")
+    user = st.session_state.get("db_user", "")
+    pwd = st.session_state.get("db_pass", "")
+    db_name = st.session_state.get("db_name", "")
+    if host and user and db_name:
+        pwd_part = f":{pwd}" if pwd else ""
+        return f"mysql+pymysql://{user}{pwd_part}@{host}:3306/{db_name}"
+    return DB_URI_SQLITE
+
+def run_data_audit(db_uri):
+    engine = create_engine(db_uri)
+    audit_logs = []
+    try:
+        df_pay = pd.read_sql("SELECT payment_value FROM df_payments WHERE payment_value < 0 LIMIT 1", engine)
+        if not df_pay.empty: audit_logs.append({"status": "error", "msg": "❌ df_payments: Phát hiện giao dịch giá trị âm."})
+        else: audit_logs.append({"status": "success", "msg": "✅ df_payments: 100% giao dịch có giá trị dương hợp lệ."})
+            
+        df_ord = pd.read_sql("SELECT order_id FROM df_orders WHERE order_status IS NULL LIMIT 1", engine)
+        if not df_ord.empty: audit_logs.append({"status": "warning", "msg": "⚠️ df_orders: Phát hiện đơn hàng bị trống trạng thái."})
+        else: audit_logs.append({"status": "success", "msg": "✅ df_orders: Toàn vẹn dữ liệu trạng thái đơn hàng."})
+    except Exception:
+        audit_logs.append({"status": "warning", "msg": "⚠️ Bỏ qua kiểm định sâu do CSDL chưa khởi tạo đầy đủ."})
+    return audit_logs
+
+def get_agent():
+    api_key = st.session_state.get("api_key", "")
+    if not api_key: return None, "Vui lòng nhập Gemini API Key trong mục ⚙️ Cấu hình."
+    try:
+        db = SQLDatabase.from_uri(get_db_uri())
+        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
+        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=10)
+        return agent_executor, "OK"
+    except Exception as e: return None, str(e)
+
+# ==========================================
+# 5. RENDER RESPONSE - BỘ LỌC SIÊU MẠNH (SỬA LỖI TRỐNG & INDENT)
+# ==========================================
+def render_assistant_response(answer, audit_logs=None):
+    answer = answer.strip()
+    
+    # --- 1. BÓC TÁCH SQL ---
+    sql_blocks = re.findall(r'```(?:sql)?\s*(.*?)\s*```', answer, re.DOTALL | re.IGNORECASE)
+    sql_to_run = sql_blocks[-1] if sql_blocks else None
+
+    # --- 2. BÓC TÁCH CHART (LOẠI BỎ \n ĐỂ FIX LỖI INDENT) ---
+    chart_spec = None
+    chart_match = re.search(r'\[CHART:(.*?)\]', answer, re.IGNORECASE)
+    if chart_match:
+        parts = chart_match.group(1).split('|')
+        if len(parts) >= 3:
+            chart_spec = {
+                "type": parts[0].strip().lower(),
+                "x": parts[1].strip().replace('\n', '').replace('\r', ''),
+                "y": parts[2].strip().replace('\n', '').replace('\r', ''),
+                "title": parts[3].strip().replace('\n', '') if len(parts) > 3 else "Biểu đồ Phân tích"
+            }
+
+    # --- 3. BÓC TÁCH INSIGHT & CHIẾN LƯỢC ---
+    phan_tich = answer
+    chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược."
+
+    pt_match = re.search(r'\[PHÂN TÍCH\](.*?)(\[CHIẾN LƯỢC\]|\[SQL\]|```|$)', answer, re.DOTALL | re.IGNORECASE)
+    if pt_match: phan_tich = pt_match.group(1).strip()
+
+    cl_match = re.search(r'\[CHIẾN LƯỢC\](.*?)(\[SQL\]|```|$)', answer, re.DOTALL | re.IGNORECASE)
+    if cl_match: chien_luoc = cl_match.group(1).strip()
+
+    if not pt_match:
+        phan_tich = re.sub(r'```.*?```', '', answer, flags=re.DOTALL)
+        phan_tich = re.sub(r'\[CHART:.*?\]', '', phan_tich, flags=re.IGNORECASE).replace("Final Answer:", "").strip()
+
+    # --- 4. GIAO DIỆN ---
+    st.markdown("---")
+    st.markdown("💡 **Hệ thống AI đã bóc tách thành công Insight từ CSDL.**")
+    
+    if audit_logs:
+        with st.expander("🔍 Biên bản Kiểm định Dữ liệu (Auto-Audit Workflow)", expanded=False):
+            for log in audit_logs:
+                if log["status"] == "error": st.error(log["msg"])
+                elif log["status"] == "warning": st.warning(log["msg"])
+                else: st.success(log["msg"])
+
+    # THỰC THI SQL
+    df_preview = None
+    if sql_to_run and "SELECT" in sql_to_run.upper():
+        try:
+            engine = create_engine(get_db_uri())
+            df_preview = pd.read_sql(sql_to_run, engine)
+        except Exception as e:
+            st.error(f"⚠️ Lỗi CSDL: {e}")
+
+    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Đề xuất Chiến lược", "⚙️ Tiến trình SQL"])
+    
+    with tab1:
+        if phan_tich: st.markdown(phan_tich)
+        else: st.info("Hệ thống chưa tìm thấy Insight đủ sâu cho câu hỏi này.")
+        
+        if df_preview is not None and not df_preview.empty and chart_spec:
+            st.markdown("---")
+            c_type = chart_spec.get("type", "none")
+            if c_type != "none":
+                x_col = chart_spec["x"]
+                y_col = chart_spec["y"]
+                title = chart_spec["title"]
+                try:
+                    if c_type == "bar": st.plotly_chart(px.bar(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
+                    elif c_type == "pie": st.plotly_chart(px.pie(df_preview, names=x_col, values=y_col, title=title), use_container_width=True)
+                    elif c_type == "line": st.plotly_chart(px.line(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
+                    elif c_type == "scatter": st.plotly_chart(px.scatter(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
+                except Exception:
+                    st.warning("⚠️ Biểu đồ không thể hiển thị do AI chọn sai tên cột. Vui lòng xem bảng dữ liệu thô ở tab 'Tiến trình SQL'.")
+            
+    with tab2: st.markdown(chien_luoc)
+        
+    with tab3:
+        if sql_to_run:
+            st.markdown("**Câu lệnh SQL đã thực thi:**")
+            st.code(sql_to_run, language="sql")
+            if df_preview is not None:
+                st.markdown("**🗄️ Bảng kết quả (Data Preview):**")
+                st.dataframe(df_preview, use_container_width=True)
+        else: st.info("Không có tiến trình SQL nào được ghi nhận.")
+
+# Hiển thị Chat
+for msg in current_chat["messages"]:
+    if msg["role"] == "user":
+        with st.chat_message("user"): st.markdown(msg["content"])
+    else:
+        with st.chat_message("assistant"): render_assistant_response(msg["content"])
+
+# Xử lý Chat mới
+if prompt := st.chat_input("VD: Cho tôi insights về doanh thu theo danh mục..."):
+    current_chat["messages"].append({"role": "user", "content": prompt})
+    save_chats()
+    
+    with st.chat_message("user"): st.markdown(prompt)
+
+    agent, status = get_agent()
+    with st.chat_message("assistant"):
+        if agent is None: st.error(status)
+        else:
+            with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
+                current_audit = run_data_audit(get_db_uri())
+                
+            with st.spinner("Agent đang phân tích sâu dữ liệu với Gemini 3.6..."):
+                try:
+                    response = agent.invoke({"input": prompt})
+                    answer = response["output"]
+                    render_assistant_response(answer, current_audit)
+                    current_chat["messages"].append({"role": "assistant", "content": answer})
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    if "Could not parse LLM output:" in error_str:
+                        extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
+                        render_assistant_response(extracted_answer, current_audit)
+                        current_chat["messages"].append({"role": "assistant", "content": extracted_answer})
+                    else:
+                        st.error(f"Đã có lỗi hệ thống xảy ra: {e}")
+                        
+        if current_chat.get("title") == "New chat":
+            clean_title = " ".join(prompt.strip().split())
+            if len(clean_title) > 34: clean_title = clean_title[:34] + "..."
+            current_chat["title"] = clean_title
+            
+        save_chats()
+        st.rerun()
