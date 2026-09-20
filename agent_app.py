@@ -21,7 +21,7 @@ from langchain_community.agent_toolkits import create_sql_agent
 DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
 DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
 
-@st.cache_resource(show_spinner="Đang nạp 89.000+ đơn hàng từ CSV vào hệ thống... Vui lòng đợi!")
+@st.cache_resource(show_spinner="Đang nạp Data & Dọn dẹp rác Duplicate... Vui lòng đợi!")
 def init_sqlite_db():
     conn = sqlite3.connect("ecommerce.db", check_same_thread=False)
     cursor = conn.cursor()
@@ -30,11 +30,13 @@ def init_sqlite_db():
     if cursor.fetchone()[0] == 0:
         try:
             read_opts = {'sep': None, 'engine': 'python', 'on_bad_lines': 'skip', 'encoding': 'utf-8'}
-            pd.read_csv("df_Customers.csv", **read_opts).to_sql('df_customers', conn, index=False, if_exists='replace')
-            pd.read_csv("df_Orders.csv", **read_opts).to_sql('df_orders', conn, index=False, if_exists='replace')
-            pd.read_csv("df_Payments.csv", **read_opts).to_sql('df_payments', conn, index=False, if_exists='replace')
-            pd.read_csv("df_Products.csv", **read_opts).to_sql('df_products', conn, index=False, if_exists='replace')
-            pd.read_csv("df_OrderItems.csv", **read_opts).to_sql('df_orderitems', conn, index=False, if_exists='replace')
+            
+            # ĐẶC TRỊ DUPLICATE: Dùng .drop_duplicates() dọn sạch rác trước khi đưa vào CSDL
+            pd.read_csv("df_Customers.csv", **read_opts).drop_duplicates().to_sql('df_customers', conn, index=False, if_exists='replace')
+            pd.read_csv("df_Orders.csv", **read_opts).drop_duplicates().to_sql('df_orders', conn, index=False, if_exists='replace')
+            pd.read_csv("df_Payments.csv", **read_opts).drop_duplicates().to_sql('df_payments', conn, index=False, if_exists='replace')
+            pd.read_csv("df_Products.csv", **read_opts).drop_duplicates().to_sql('df_products', conn, index=False, if_exists='replace')
+            pd.read_csv("df_OrderItems.csv", **read_opts).drop_duplicates().to_sql('df_orderitems', conn, index=False, if_exists='replace')
         except Exception as e:
             st.error(f"Lỗi đọc file CSV: {e} - Hãy chắc chắn 5 file CSV đang nằm chung thư mục với app.py")
     conn.close()
@@ -159,23 +161,25 @@ with st.sidebar:
 # 4. BỘ NÃO CHIẾN LƯỢC & PROMPT
 # ==========================================
 instructions_raw = """
-Bạn là Kỹ sư Dữ liệu cấp cao. 
-1. BẮT BUỘC dùng tool để chạy SQL lấy kết quả thực tế. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
-2. Trả lời cuối cùng BẮT BUỘC phải theo đúng cấu trúc sau:
+Bạn là Giám đốc Chiến lược Dữ liệu (Chief Data Officer). 
+1. BẮT BUỘC dùng tool để chạy SQL lấy kết quả thực tế từ CSDL. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
+2. KHỬ TRÙNG LẶP: Dữ liệu thực tế thường bị nhân bản khi JOIN bảng. BẠN BẮT BUỘC phải dùng COUNT(DISTINCT cột_id) thay vì COUNT() thông thường (Ví dụ: COUNT(DISTINCT order_id)).
+3. Trả lời cuối cùng BẮT BUỘC phải theo đúng cấu trúc sau:
 
 [BIỂU ĐỒ]
 [CHART:loại_biểu_đồ|tên_cột_x|tên_cột_y|tiêu_đề]
 
 [PHÂN TÍCH]
-- Trình bày chi tiết dữ liệu vừa truy xuất được.
-- Đưa ra ít nhất 2 insight kinh doanh cụ thể từ con số trên. (Viết chi tiết, tuyệt đối không được bỏ trống phần này)
+TUYỆT ĐỐI KHÔNG liệt kê lại các dòng dữ liệu thô. Chỉ tập trung viết đúng 2 ý sau:
+- 1. Insight cơ bản: Đúc kết ngắn gọn xu hướng hoặc nguyên nhân cốt lõi từ số liệu.
+- 2. Insight nghịch lý/chuyên sâu: BẮT BUỘC chỉ ra một điểm bất thường, trái logic thông thường, hoặc một góc khuất ẩn sâu đằng sau số liệu (Ví dụ: Doanh thu cao nhưng tỷ lệ hủy đơn lại cao nhất; Nhóm sản phẩm bán chạy nhất nhưng biên độ lợi nhuận lại thấp...). 
 
 [CHIẾN LƯỢC]
-- Đề xuất 2-3 hành động cụ thể để cải thiện.
+- Đề xuất 2-3 chiến thuật cụ thể để xử lý hoặc tận dụng chính cái "Insight nghịch lý" vừa tìm thấy.
 
 [SQL]
 '''sql
--- Dán câu SQL đã chạy thành công vào đây
+-- Dán câu lệnh SQL đã chạy thành công vào đây
 '''
 """
 instructions = instructions_raw.replace("'''", "```")
@@ -209,14 +213,14 @@ def get_agent():
     api_key = st.session_state.get("api_key", "")
     if not api_key: return None, "Vui lòng nhập Gemini API Key trong mục ⚙️ Cấu hình."
     try:
-        db = SQLDatabase.from_uri(get_db_uri())
+        db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=0)
         llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
-        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=10)
+        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=5)
         return agent_executor, "OK"
     except Exception as e: return None, str(e)
 
 # ==========================================
-# 5. RENDER RESPONSE - BỘ LỌC SIÊU MẠNH (SỬA LỖI TRỐNG & INDENT)
+# 5. RENDER RESPONSE - BỘ LỌC SIÊU MẠNH
 # ==========================================
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.strip()
@@ -225,7 +229,7 @@ def render_assistant_response(answer, audit_logs=None):
     sql_blocks = re.findall(r'```(?:sql)?\s*(.*?)\s*```', answer, re.DOTALL | re.IGNORECASE)
     sql_to_run = sql_blocks[-1] if sql_blocks else None
 
-    # --- 2. BÓC TÁCH CHART (LOẠI BỎ \n ĐỂ FIX LỖI INDENT) ---
+    # --- 2. BÓC TÁCH CHART ---
     chart_spec = None
     chart_match = re.search(r'\[CHART:(.*?)\]', answer, re.IGNORECASE)
     if chart_match:
