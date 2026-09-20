@@ -30,8 +30,6 @@ def init_sqlite_db():
     if cursor.fetchone()[0] == 0:
         try:
             read_opts = {'sep': None, 'engine': 'python', 'on_bad_lines': 'skip', 'encoding': 'utf-8'}
-            
-            # ĐẶC TRỊ DUPLICATE: Dùng .drop_duplicates() dọn sạch rác trước khi đưa vào CSDL
             pd.read_csv("df_Customers.csv", **read_opts).drop_duplicates().to_sql('df_customers', conn, index=False, if_exists='replace')
             pd.read_csv("df_Orders.csv", **read_opts).drop_duplicates().to_sql('df_orders', conn, index=False, if_exists='replace')
             pd.read_csv("df_Payments.csv", **read_opts).drop_duplicates().to_sql('df_payments', conn, index=False, if_exists='replace')
@@ -213,23 +211,25 @@ def get_agent():
     api_key = st.session_state.get("api_key", "")
     if not api_key: return None, "Vui lòng nhập Gemini API Key trong mục ⚙️ Cấu hình."
     try:
-        db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=0)
+        # CẤP NHÌN DATA MẪU: Đổi thành 2 để AI thấy tên cột chuẩn xác, giảm lỗi SQL
+        db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=2)
         llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
-        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=5)
+        # NỚI LỎNG VÒNG LẶP: Tăng lên 8 để AI có cơ hội sửa lỗi SQL
+        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=8)
         return agent_executor, "OK"
     except Exception as e: return None, str(e)
 
 # ==========================================
-# 5. RENDER RESPONSE - BỘ LỌC SIÊU MẠNH
+# 5. RENDER RESPONSE
 # ==========================================
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.strip()
     
-    # --- 1. BÓC TÁCH SQL ---
+    # BÓC TÁCH SQL
     sql_blocks = re.findall(r'```(?:sql)?\s*(.*?)\s*```', answer, re.DOTALL | re.IGNORECASE)
     sql_to_run = sql_blocks[-1] if sql_blocks else None
 
-    # --- 2. BÓC TÁCH CHART ---
+    # BÓC TÁCH CHART
     chart_spec = None
     chart_match = re.search(r'\[CHART:(.*?)\]', answer, re.IGNORECASE)
     if chart_match:
@@ -242,7 +242,7 @@ def render_assistant_response(answer, audit_logs=None):
                 "title": parts[3].strip().replace('\n', '') if len(parts) > 3 else "Biểu đồ Phân tích"
             }
 
-    # --- 3. BÓC TÁCH INSIGHT & CHIẾN LƯỢC ---
+    # BÓC TÁCH INSIGHT & CHIẾN LƯỢC
     phan_tich = answer
     chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược."
 
@@ -256,7 +256,6 @@ def render_assistant_response(answer, audit_logs=None):
         phan_tich = re.sub(r'```.*?```', '', answer, flags=re.DOTALL)
         phan_tich = re.sub(r'\[CHART:.*?\]', '', phan_tich, flags=re.IGNORECASE).replace("Final Answer:", "").strip()
 
-    # --- 4. GIAO DIỆN ---
     st.markdown("---")
     st.markdown("💡 **Hệ thống AI đã bóc tách thành công Insight từ CSDL.**")
     
@@ -338,10 +337,16 @@ if prompt := st.chat_input("VD: Cho tôi insights về doanh thu theo danh mục
                     
                 except Exception as e:
                     error_str = str(e)
+                    # Bắt lỗi Parsing
                     if "Could not parse LLM output:" in error_str:
                         extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
                         render_assistant_response(extracted_answer, current_audit)
                         current_chat["messages"].append({"role": "assistant", "content": extracted_answer})
+                    # Bắt lỗi Iteration Limit
+                    elif "Agent stopped due to iteration limit or time limit" in error_str:
+                        err_msg = "⚠️ AI đã thử truy xuất dữ liệu nhiều lần nhưng liên tục gặp lỗi SQL nên phải tự động dừng để bảo vệ API. Sếp thử đặt câu hỏi với tên bảng/cột cụ thể hơn nhé!"
+                        st.error(err_msg)
+                        current_chat["messages"].append({"role": "assistant", "content": err_msg})
                     else:
                         st.error(f"Đã có lỗi hệ thống xảy ra: {e}")
                         
