@@ -217,7 +217,8 @@ def get_agent():
     if not api_key: return None, "Vui lòng nhập Gemini API Key trong mục ⚙️ Cấu hình."
     try:
         db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=3)
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key, temperature=0.1)
+        # Giữ nguyên model gemini-3.6-flash theo yêu cầu của Sếp
+        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
         agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=8)
         return agent_executor, "OK"
     except Exception as e: return None, str(e)
