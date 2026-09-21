@@ -94,6 +94,7 @@ st.set_page_config(page_title="My AI agent", page_icon="🛒", layout="wide")
 st.title("🛒 My AI agent")
 st.markdown("Trợ lý AI phân tích dữ liệu, săn Insight & Hoạch định Chiến lược")
 st.markdown("🔥 **Agent phát triển bởi: Group 3 - TINE313** 🔥")
+st.caption("Analyst → Paradox Hunter → SQL Verification → Final Judge & Strategy • Read-only SQLite")
 
 # ==========================================
 # 3. KHU VỰC SIDEBAR & CẤU HÌNH
@@ -112,7 +113,7 @@ with st.sidebar:
             st.text_input("Gemini API Key:", type="password", key="api_key")
             st.markdown("[👉 Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
             st.markdown("---")
-            st.markdown("**Kết nối MySQL Workbench**")
+            st.markdown("**Kết nối MySQL (Tùy chọn)**")
             st.caption("Để trống nếu dùng CSDL SQLite mặc định.")
             st.text_input("Host (VD: localhost):", key="db_host")
             st.text_input("Username (VD: root):", key="db_user")
@@ -131,7 +132,7 @@ with st.sidebar:
         """)
 
     st.markdown("---")
-    st.markdown("🕒 **Lịch sử Hội thoại**")
+    st.markdown("💬 **Chats**")
     
     has_history = False
     for chat_id, chat_data in reversed(list(st.session_state.chats.items())):
@@ -161,9 +162,10 @@ with st.sidebar:
 # ==========================================
 instructions_raw = """
 Bạn là Giám đốc Chiến lược Dữ liệu (Chief Data Officer). 
-1. BẮT BUỘC dùng tool để chạy SQL lấy kết quả thực tế từ CSDL. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
-2. KHỬ TRÙNG LẶP: Dữ liệu thực tế thường bị nhân bản khi JOIN bảng. BẠN BẮT BUỘC phải dùng COUNT(DISTINCT cột_id) thay vì COUNT() thông thường (Ví dụ: COUNT(DISTINCT order_id)).
-3. Trả lời cuối cùng BẮT BUỘC phải theo đúng cấu trúc sau:
+1. KIỂM TRA SƠ ĐỒ CSDL TRƯỚC: BẮT BUỘC dùng tool kiểm tra tên cột thực tế trong bảng trước khi truy vấn. Tuyệt đối không tự đoán tên cột.
+2. BẮT BUỘC dùng tool để chạy SQL lấy kết quả thực tế từ CSDL. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
+3. KHỬ TRÙNG LẶP: Dữ liệu thực tế thường bị nhân bản khi JOIN bảng. BẠN BẮT BUỘC phải dùng COUNT(DISTINCT cột_id) thay vì COUNT() thông thường (Ví dụ: COUNT(DISTINCT order_id)).
+4. Trả lời cuối cùng BẮT BUỘC phải theo đúng cấu trúc sau:
 
 [BIỂU ĐỒ]
 [CHART:loại_biểu_đồ|tên_cột_x|tên_cột_y|tiêu_đề]
@@ -171,10 +173,12 @@ Bạn là Giám đốc Chiến lược Dữ liệu (Chief Data Officer).
 [PHÂN TÍCH]
 TUYỆT ĐỐI KHÔNG liệt kê lại các dòng dữ liệu thô. Chỉ tập trung viết đúng 2 ý sau:
 - 1. Insight cơ bản: Đúc kết ngắn gọn xu hướng hoặc nguyên nhân cốt lõi từ số liệu.
-- 2. Insight nghịch lý/chuyên sâu: BẮT BUỘC chỉ ra một điểm bất thường, trái logic thông thường, hoặc một góc khuất ẩn sâu đằng sau số liệu (Ví dụ: Doanh thu cao nhưng tỷ lệ hủy đơn lại cao nhất; Nhóm sản phẩm bán chạy nhất nhưng biên độ lợi nhuận lại thấp...). 
+- 2. Insight nghịch lý/chuyên sâu: BẮT BUỘC chỉ ra một điểm bất thường, trái logic thông thường, hoặc một góc khuất ẩn sâu đằng sau số liệu. 
 
 [CHIẾN LƯỢC]
-- Đề xuất 2-3 chiến thuật cụ thể để xử lý hoặc tận dụng chính cái "Insight nghịch lý" vừa tìm thấy.
+Trình bày theo 2 phần rõ ràng:
+- 1. Giải pháp thực thi: Đề xuất 2-3 chiến thuật cụ thể để xử lý hoặc tận dụng "Insight nghịch lý" vừa tìm thấy.
+- 2. Dự báo tương lai: NẾU áp dụng các giải pháp trên, dự báo các chỉ số sẽ cải thiện như thế nào trong tương lai (Ví dụ: "Dự kiến doanh thu sẽ tăng X% hoặc tỷ lệ hủy giảm Y%..."). Hãy tính toán dựa trên số liệu đà tăng trưởng/tỷ lệ hiện tại đã truy xuất để ước lượng định lượng cụ thể.
 
 [SQL]
 '''sql
@@ -212,8 +216,8 @@ def get_agent():
     api_key = st.session_state.get("api_key", "")
     if not api_key: return None, "Vui lòng nhập Gemini API Key trong mục ⚙️ Cấu hình."
     try:
-        db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=2)
-        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
+        db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=3)
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key, temperature=0.1)
         agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=8)
         return agent_executor, "OK"
     except Exception as e: return None, str(e)
@@ -277,7 +281,7 @@ def render_assistant_response(answer, audit_logs=None):
         except Exception as e:
             st.error(f"⚠️ Lỗi CSDL: {e}")
 
-    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Đề xuất Chiến lược", "⚙️ Tiến trình SQL"])
+    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Chiến lược & Dự báo", "⚙️ Tiến trình SQL"])
     
     with tab1:
         if phan_tich: st.markdown(phan_tich)
@@ -356,6 +360,13 @@ for msg in current_chat["messages"]:
 
 # Xử lý Chat mới
 if prompt := st.chat_input("VD: Cho tôi insights về doanh thu theo danh mục..."):
+    # GIỚI HẠN NHỚ 3 CÂU LỊCH SỬ ĐỂ GỬI CHO AI (BẢO VỆ API)
+    context_msgs = current_chat["messages"][-3:] if len(current_chat["messages"]) >= 3 else current_chat["messages"]
+    context_str = "\n".join([f"{m['role']}: {m['content']}" for m in context_msgs])
+    
+    # Nối lịch sử vào câu hỏi mới (chỉ để AI đọc, không hiển thị cho user)
+    full_prompt = f"Lịch sử trò chuyện gần đây:\n{context_str}\n\nCâu hỏi hiện tại: {prompt}" if context_str else prompt
+    
     current_chat["messages"].append({"role": "user", "content": prompt})
     save_chats()
     
@@ -368,9 +379,9 @@ if prompt := st.chat_input("VD: Cho tôi insights về doanh thu theo danh mục
             with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
                 current_audit = run_data_audit(get_db_uri())
                 
-            with st.spinner("Agent đang phân tích sâu dữ liệu với Gemini 3.6..."):
+            with st.spinner("Agent đang phân tích và dự báo..."):
                 try:
-                    response = agent.invoke({"input": prompt})
+                    response = agent.invoke({"input": full_prompt})
                     answer = response["output"]
                     render_assistant_response(answer, current_audit)
                     current_chat["messages"].append({"role": "assistant", "content": answer})
@@ -382,7 +393,7 @@ if prompt := st.chat_input("VD: Cho tôi insights về doanh thu theo danh mục
                         render_assistant_response(extracted_answer, current_audit)
                         current_chat["messages"].append({"role": "assistant", "content": extracted_answer})
                     elif "Agent stopped due to iteration limit or time limit" in error_str:
-                        err_msg = "⚠️ AI đã thử truy xuất dữ liệu nhiều lần nhưng liên tục gặp lỗi SQL nên phải tự động dừng để bảo vệ API. Sếp thử đặt câu hỏi với tên bảng/cột cụ thể hơn nhé!"
+                        err_msg = "⚠️ AI đã thử truy xuất dữ liệu nhiều lần nhưng liên tục gặp lỗi SQL nên phải tự động dừng để bảo vệ API. Hệ thống khuyên Sếp cung cấp tên cột cụ thể hơn hoặc kiểm tra lại tệp CSV gốc!"
                         st.error(err_msg)
                         current_chat["messages"].append({"role": "assistant", "content": err_msg})
                     else:
