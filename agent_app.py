@@ -3,6 +3,7 @@ import re
 import json
 import sqlite3
 import uuid
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -211,19 +212,20 @@ def get_agent():
     api_key = st.session_state.get("api_key", "")
     if not api_key: return None, "Vui lòng nhập Gemini API Key trong mục ⚙️ Cấu hình."
     try:
-        # CẤP NHÌN DATA MẪU: Đổi thành 2 để AI thấy tên cột chuẩn xác, giảm lỗi SQL
         db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=2)
         llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
-        # NỚI LỎNG VÒNG LẶP: Tăng lên 8 để AI có cơ hội sửa lỗi SQL
         agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=8)
         return agent_executor, "OK"
     except Exception as e: return None, str(e)
 
 # ==========================================
-# 5. RENDER RESPONSE
+# 5. RENDER RESPONSE (POWER BI STYLE CHARTING)
 # ==========================================
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.strip()
+    
+    # Tạo widget key độc nhất cho mỗi đoạn chat để tránh trùng lặp UI
+    widget_key = hashlib.md5(answer.encode('utf-8')).hexdigest()[:10]
     
     # BÓC TÁCH SQL
     sql_blocks = re.findall(r'```(?:sql)?\s*(.*?)\s*```', answer, re.DOTALL | re.IGNORECASE)
@@ -281,20 +283,58 @@ def render_assistant_response(answer, audit_logs=None):
         if phan_tich: st.markdown(phan_tich)
         else: st.info("Hệ thống chưa tìm thấy Insight đủ sâu cho câu hỏi này.")
         
-        if df_preview is not None and not df_preview.empty and chart_spec:
+        # --- POWER BI STYLE INTERACTIVE CHARTING ---
+        if df_preview is not None and not df_preview.empty:
             st.markdown("---")
-            c_type = chart_spec.get("type", "none")
-            if c_type != "none":
-                x_col = chart_spec["x"]
-                y_col = chart_spec["y"]
-                title = chart_spec["title"]
+            st.markdown("### 📊 Interactive Dashboard (Power BI Style)")
+            
+            # Khởi tạo giá trị mặc định từ gợi ý của AI
+            default_type = "bar"
+            default_x = df_preview.columns[0]
+            default_y = df_preview.columns[-1] if len(df_preview.columns) > 1 else df_preview.columns[0]
+            default_title = "Data Visualization"
+            
+            if chart_spec:
+                default_type = chart_spec.get("type", "bar")
+                default_x = chart_spec.get("x", default_x)
+                default_y = chart_spec.get("y", default_y)
+                default_title = chart_spec.get("title", default_title)
+
+            # Chuẩn hóa để tránh lỗi nếu AI gợi ý sai tên cột
+            if default_type not in ["bar", "line", "pie", "scatter", "area"]: default_type = "bar"
+            if default_x not in df_preview.columns: default_x = df_preview.columns[0]
+            if default_y not in df_preview.columns: default_y = df_preview.columns[-1]
+
+            # Chia UI làm 2 phần: Canvas vẽ biểu đồ (Trái) và Visualizations Pane (Phải)
+            viz_col, control_col = st.columns([3, 1])
+            
+            with control_col:
+                st.markdown("⚙️ **Visualizations Pane**")
+                chart_types = ["bar", "line", "pie", "scatter", "area"]
+                selected_type = st.selectbox("Loại biểu đồ", chart_types, index=chart_types.index(default_type), key=f"type_{widget_key}")
+                selected_x = st.selectbox("Trục X (Dimension)", df_preview.columns, index=list(df_preview.columns).index(default_x), key=f"x_{widget_key}")
+                selected_y = st.selectbox("Trục Y (Measure)", df_preview.columns, index=list(df_preview.columns).index(default_y), key=f"y_{widget_key}")
+                color_col_choice = st.selectbox("Phân loại (Legend)", ["None"] + list(df_preview.columns), key=f"color_{widget_key}")
+
+            with viz_col:
                 try:
-                    if c_type == "bar": st.plotly_chart(px.bar(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
-                    elif c_type == "pie": st.plotly_chart(px.pie(df_preview, names=x_col, values=y_col, title=title), use_container_width=True)
-                    elif c_type == "line": st.plotly_chart(px.line(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
-                    elif c_type == "scatter": st.plotly_chart(px.scatter(df_preview, x=x_col, y=y_col, title=title), use_container_width=True)
-                except Exception:
-                    st.warning("⚠️ Biểu đồ không thể hiển thị do AI chọn sai tên cột. Vui lòng xem bảng dữ liệu thô ở tab 'Tiến trình SQL'.")
+                    color_arg = None if color_col_choice == "None" else color_col_choice
+                    
+                    if selected_type == "bar":
+                        fig = px.bar(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
+                    elif selected_type == "line":
+                        fig = px.line(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
+                    elif selected_type == "pie":
+                        fig = px.pie(df_preview, names=selected_x, values=selected_y, title=default_title)
+                    elif selected_type == "scatter":
+                        fig = px.scatter(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
+                    elif selected_type == "area":
+                        fig = px.area(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
+                    
+                    fig.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"⚠️ Dữ liệu không tương thích với loại biểu đồ này. Vui lòng đổi trục X/Y ở bảng điều khiển. (Lỗi: {e})")
             
     with tab2: st.markdown(chien_luoc)
         
@@ -337,12 +377,10 @@ if prompt := st.chat_input("VD: Cho tôi insights về doanh thu theo danh mục
                     
                 except Exception as e:
                     error_str = str(e)
-                    # Bắt lỗi Parsing
                     if "Could not parse LLM output:" in error_str:
                         extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
                         render_assistant_response(extracted_answer, current_audit)
                         current_chat["messages"].append({"role": "assistant", "content": extracted_answer})
-                    # Bắt lỗi Iteration Limit
                     elif "Agent stopped due to iteration limit or time limit" in error_str:
                         err_msg = "⚠️ AI đã thử truy xuất dữ liệu nhiều lần nhưng liên tục gặp lỗi SQL nên phải tự động dừng để bảo vệ API. Sếp thử đặt câu hỏi với tên bảng/cột cụ thể hơn nhé!"
                         st.error(err_msg)
