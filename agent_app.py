@@ -3,14 +3,11 @@ import re
 import json
 import sqlite3
 import uuid
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+import hashlib
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 from sqlalchemy import create_engine
-
 from langchain_community.utilities import SQLDatabase
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.agent_toolkits import create_sql_agent
@@ -21,7 +18,7 @@ from langchain_community.agent_toolkits import create_sql_agent
 DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
 DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
 
-@st.cache_resource(show_spinner="Đang nạp 89.000+ đơn hàng từ CSV vào hệ thống... Vui lòng đợi!")
+@st.cache_resource(show_spinner="Đang nạp Data & Dọn dẹp rác Duplicate... Vui lòng đợi!")
 def init_sqlite_db():
     conn = sqlite3.connect("ecommerce.db", check_same_thread=False)
     cursor = conn.cursor()
@@ -30,11 +27,11 @@ def init_sqlite_db():
     if cursor.fetchone()[0] == 0:
         try:
             read_opts = {'sep': None, 'engine': 'python', 'on_bad_lines': 'skip', 'encoding': 'utf-8'}
-            pd.read_csv("df_Customers.csv", **read_opts).to_sql('df_customers', conn, index=False, if_exists='replace')
-            pd.read_csv("df_Orders.csv", **read_opts).to_sql('df_orders', conn, index=False, if_exists='replace')
-            pd.read_csv("df_Payments.csv", **read_opts).to_sql('df_payments', conn, index=False, if_exists='replace')
-            pd.read_csv("df_Products.csv", **read_opts).to_sql('df_products', conn, index=False, if_exists='replace')
-            pd.read_csv("df_OrderItems.csv", **read_opts).to_sql('df_orderitems', conn, index=False, if_exists='replace')
+            pd.read_csv("df_Customers.csv", **read_opts).drop_duplicates().to_sql('df_customers', conn, index=False, if_exists='replace')
+            pd.read_csv("df_Orders.csv", **read_opts).drop_duplicates().to_sql('df_orders', conn, index=False, if_exists='replace')
+            pd.read_csv("df_Payments.csv", **read_opts).drop_duplicates().to_sql('df_payments', conn, index=False, if_exists='replace')
+            pd.read_csv("df_Products.csv", **read_opts).drop_duplicates().to_sql('df_products', conn, index=False, if_exists='replace')
+            pd.read_csv("df_OrderItems.csv", **read_opts).drop_duplicates().to_sql('df_orderitems', conn, index=False, if_exists='replace')
         except Exception as e:
             st.error(f"Lỗi đọc file CSV: {e} - Hãy chắc chắn 5 file CSV đang nằm chung thư mục với app.py")
     conn.close()
@@ -159,23 +156,28 @@ with st.sidebar:
 # 4. BỘ NÃO CHIẾN LƯỢC & PROMPT
 # ==========================================
 instructions_raw = """
-Bạn là Kỹ sư Dữ liệu cấp cao.
-1. BẮT BUỘC dùng tool để chạy SQL lấy kết quả thực tế. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
-2. Trả lời cuối cùng BẮT BUỘC phải theo đúng cấu trúc sau:
+Bạn là Giám đốc Chiến lược Dữ liệu (Chief Data Officer). 
+1. KIỂM TRA SƠ ĐỒ CSDL TRƯỚC: BẮT BUỘC dùng tool kiểm tra tên cột thực tế trong bảng trước khi truy vấn. Tuyệt đối không tự đoán tên cột.
+2. BẮT BUỘC dùng tool để chạy SQL lấy kết quả thực tế từ CSDL. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
+3. KHỬ TRÙNG LẶP: Dữ liệu thực tế thường bị nhân bản khi JOIN bảng. BẠN BẮT BUỘC phải dùng COUNT(DISTINCT cột_id) thay vì COUNT() thông thường (Ví dụ: COUNT(DISTINCT order_id)).
+4. Trả lời cuối cùng BẮT BUỘC phải theo đúng cấu trúc sau:
 
 [BIỂU ĐỒ]
 [CHART:loại_biểu_đồ|tên_cột_x|tên_cột_y|tiêu_đề]
 
 [PHÂN TÍCH]
-- Trình bày chi tiết dữ liệu vừa truy xuất được.
-- Đưa ra ít nhất 2 insight kinh doanh cụ thể từ con số trên. (Viết chi tiết, tuyệt đối không được bỏ trống phần này)
+TUYỆT ĐỐI KHÔNG liệt kê lại các dòng dữ liệu thô. Chỉ tập trung viết đúng 2 ý sau:
+- 1. Insight cơ bản: Đúc kết ngắn gọn xu hướng hoặc nguyên nhân cốt lõi từ số liệu.
+- 2. Insight nghịch lý/chuyên sâu: BẮT BUỘC chỉ ra một điểm bất thường, trái logic thông thường, hoặc một góc khuất ẩn sâu đằng sau số liệu. 
 
 [CHIẾN LƯỢC]
-- Đề xuất 2-3 hành động cụ thể để cải thiện.
+Trình bày theo 2 phần rõ ràng:
+- 1. Giải pháp thực thi: Đề xuất 2-3 chiến thuật cụ thể để xử lý hoặc tận dụng "Insight nghịch lý" vừa tìm thấy.
+- 2. Dự báo tương lai: NẾU áp dụng các giải pháp trên, dự báo các chỉ số sẽ cải thiện như thế nào trong tương lai.
 
 [SQL]
 '''sql
--- Dán câu SQL đã chạy thành công vào đây
+-- Dán câu lệnh SQL đã chạy thành công vào đây
 '''
 """
 instructions = instructions_raw.replace("'''", "```")
@@ -209,23 +211,23 @@ def get_agent():
     api_key = st.session_state.get("api_key", "")
     if not api_key: return None, "Vui lòng nhập Gemini API Key trong mục ⚙️ Cấu hình."
     try:
-        db = SQLDatabase.from_uri(get_db_uri())
+        db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=3)
         llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
-        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=10)
+        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=8)
         return agent_executor, "OK"
     except Exception as e: return None, str(e)
 
 # ==========================================
-# 5. RENDER RESPONSE - BỘ LỌC SIÊU MẠNH (SỬA LỖI TRỐNG & INDENT)
+# 5. RENDER RESPONSE (POWER BI STYLE CHARTING)
 # ==========================================
 def render_assistant_response(answer, audit_logs=None):
     answer = answer.strip()
     
-    # --- 1. BÓC TÁCH SQL ---
+    widget_key = hashlib.md5(answer.encode('utf-8')).hexdigest()[:10]
+    
     sql_blocks = re.findall(r'```(?:sql)?\s*(.*?)\s*```', answer, re.DOTALL | re.IGNORECASE)
     sql_to_run = sql_blocks[-1] if sql_blocks else None
 
-    # --- 2. BÓC TÁCH CHART (LOẠI BỎ \n ĐỂ FIX LỖI INDENT) ---
     chart_spec = None
     chart_match = re.search(r'\[CHART:(.*?)\]', answer, re.IGNORECASE)
     if chart_match:
@@ -238,7 +240,6 @@ def render_assistant_response(answer, audit_logs=None):
                 "title": parts[3].strip().replace('\n', '') if len(parts) > 3 else "Biểu đồ Phân tích"
             }
 
-    # --- 3. BÓC TÁCH INSIGHT & CHIẾN LƯỢC ---
     phan_tich = answer
     chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược."
 
@@ -251,3 +252,149 @@ def render_assistant_response(answer, audit_logs=None):
     if not pt_match:
         phan_tich = re.sub(r'```.*?```', '', answer, flags=re.DOTALL)
         phan_tich = re.sub(r'\[CHART:.*?\]', '', phan_tich, flags=re.IGNORECASE).replace("Final Answer:", "").strip()
+
+    st.markdown("---")
+    st.markdown("💡 **Hệ thống AI đã bóc tách thành công Insight từ CSDL.**")
+    
+    if audit_logs:
+        with st.expander("🔍 Biên bản Kiểm định Dữ liệu (Auto-Audit Workflow)", expanded=False):
+            for log in audit_logs:
+                if log["status"] == "error": st.error(log["msg"])
+                elif log["status"] == "warning": st.warning(log["msg"])
+                else: st.success(log["msg"])
+
+    df_preview = None
+    if sql_to_run and "SELECT" in sql_to_run.upper():
+        try:
+            engine = create_engine(get_db_uri())
+            df_preview = pd.read_sql(sql_to_run, engine)
+        except Exception as e:
+            st.error(f"⚠️ Lỗi CSDL: {e}")
+
+    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Chiến lược & Dự báo", "⚙️ Tiến trình SQL"])
+    
+    with tab1:
+        if phan_tich: st.markdown(phan_tich)
+        else: st.info("Hệ thống chưa tìm thấy Insight đủ sâu cho câu hỏi này.")
+        
+        if df_preview is not None and not df_preview.empty:
+            st.markdown("---")
+            st.markdown("### 📊 Interactive Dashboard (Power BI Style)")
+            
+            default_type = "bar"
+            default_x = df_preview.columns[0]
+            default_y = df_preview.columns[-1] if len(df_preview.columns) > 1 else df_preview.columns[0]
+            default_title = "Data Visualization"
+            
+            if chart_spec:
+                default_type = chart_spec.get("type", "bar")
+                default_x = chart_spec.get("x", default_x)
+                default_y = chart_spec.get("y", default_y)
+                default_title = chart_spec.get("title", default_title)
+
+            if default_type not in ["bar", "line", "pie", "scatter", "area"]: default_type = "bar"
+            if default_x not in df_preview.columns: default_x = df_preview.columns[0]
+            if default_y not in df_preview.columns: default_y = df_preview.columns[-1]
+
+            viz_col, control_col = st.columns([3, 1])
+            
+            with control_col:
+                st.markdown("⚙️ **Visualizations Pane**")
+                chart_types = ["bar", "line", "pie", "scatter", "area"]
+                selected_type = st.selectbox("Loại biểu đồ", chart_types, index=chart_types.index(default_type), key=f"type_{widget_key}")
+                selected_x = st.selectbox("Trục X (Dimension)", df_preview.columns, index=list(df_preview.columns).index(default_x), key=f"x_{widget_key}")
+                selected_y = st.selectbox("Trục Y (Measure)", df_preview.columns, index=list(df_preview.columns).index(default_y), key=f"y_{widget_key}")
+                color_col_choice = st.selectbox("Phân loại (Legend)", ["None"] + list(df_preview.columns), key=f"color_{widget_key}")
+                show_trend = st.checkbox("📈 Bật đường dự báo (Trendline)", key=f"trend_{widget_key}")
+
+            with viz_col:
+                try:
+                    color_arg = None if color_col_choice == "None" else color_col_choice
+                    
+                    if selected_type == "scatter":
+                        if show_trend:
+                            try:
+                                fig = px.scatter(df_preview, x=selected_x, y=selected_y, color=color_arg, trendline="ols", title=default_title)
+                            except Exception:
+                                fig = px.scatter(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
+                                st.warning("⚠️ Cần cài đặt thư viện 'statsmodels' (pip install statsmodels) để vẽ đường xu hướng OLS.")
+                        else:
+                            fig = px.scatter(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
+                    elif selected_type == "bar":
+                        fig = px.bar(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
+                    elif selected_type == "line":
+                        fig = px.line(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
+                    elif selected_type == "pie":
+                        fig = px.pie(df_preview, names=selected_x, values=selected_y, title=default_title)
+                    elif selected_type == "area":
+                        fig = px.area(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
+                    
+                    fig.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"⚠️ Dữ liệu không tương thích với loại biểu đồ này. Vui lòng đổi trục X/Y ở bảng điều khiển. (Lỗi: {e})")
+            
+    with tab2: st.markdown(chien_luoc)
+        
+    with tab3:
+        if sql_to_run:
+            st.markdown("**Câu lệnh SQL đã thực thi:**")
+            st.code(sql_to_run, language="sql")
+            if df_preview is not None:
+                st.markdown("**🗄️ Bảng kết quả (Data Preview):**")
+                st.dataframe(df_preview, use_container_width=True)
+        else: st.info("Không có tiến trình SQL nào được ghi nhận.")
+
+# Hiển thị Chat
+for msg in current_chat["messages"]:
+    if msg["role"] == "user":
+        with st.chat_message("user"): st.markdown(msg["content"])
+    else:
+        with st.chat_message("assistant"): render_assistant_response(msg["content"])
+
+# Xử lý Chat mới
+if prompt := st.chat_input("VD: Cho tôi insights về doanh thu và vẽ biểu đồ..."):
+    context_msgs = current_chat["messages"][-3:] if len(current_chat["messages"]) >= 3 else current_chat["messages"]
+    context_str = "\n".join([f"{m['role']}: {m['content']}" for m in context_msgs])
+    
+    full_prompt = f"Lịch sử trò chuyện gần đây:\n{context_str}\n\nCâu hỏi hiện tại: {prompt}" if context_str else prompt
+    
+    current_chat["messages"].append({"role": "user", "content": prompt})
+    save_chats()
+    
+    with st.chat_message("user"): st.markdown(prompt)
+
+    agent, status = get_agent()
+    with st.chat_message("assistant"):
+        if agent is None: st.error(status)
+        else:
+            with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
+                current_audit = run_data_audit(get_db_uri())
+                
+            with st.spinner("Agent đang phân tích và dự báo..."):
+                try:
+                    response = agent.invoke({"input": full_prompt})
+                    answer = response["output"]
+                    render_assistant_response(answer, current_audit)
+                    current_chat["messages"].append({"role": "assistant", "content": answer})
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    if "Could not parse LLM output:" in error_str:
+                        extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
+                        render_assistant_response(extracted_answer, current_audit)
+                        current_chat["messages"].append({"role": "assistant", "content": extracted_answer})
+                    elif "Agent stopped due to iteration limit or time limit" in error_str:
+                        err_msg = "⚠️ AI đã thử truy xuất dữ liệu nhiều lần nhưng liên tục gặp lỗi SQL nên phải tự động dừng để bảo vệ API. Hệ thống khuyên Sếp cung cấp tên cột cụ thể hơn hoặc kiểm tra lại tệp CSV gốc!"
+                        st.error(err_msg)
+                        current_chat["messages"].append({"role": "assistant", "content": err_msg})
+                    else:
+                        st.error(f"Đã có lỗi hệ thống xảy ra: {e}")
+                        
+        if current_chat.get("title") == "New chat":
+            clean_title = " ".join(prompt.strip().split())
+            if len(clean_title) > 34: clean_title = clean_title[:34] + "..."
+            current_chat["title"] = clean_title
+            
+        save_chats()
+        st.rerun()
