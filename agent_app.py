@@ -249,4 +249,5 @@ def render_assistant_response(answer, audit_logs=None):
     if cl_match: chien_luoc = cl_match.group(1).strip()
 
     if not pt_match:
-        phan_tich = re.sub(r'```.*?
+        phan_tich = re.sub(r'```.*?```', '', answer, flags=re.DOTALL)
+        phan_tich = re.sub(r'\[CHART:.*?\]', '', phan_tich, flags=re.IGNORECASE).replace("Final Answer:", "").strip()
