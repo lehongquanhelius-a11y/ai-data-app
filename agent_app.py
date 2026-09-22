@@ -1,124 +1,101 @@
-import os
-import re
-import json
-import sqlite3
-import uuid
-import hashlib
-import traceback
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-import pandas as pd
-import plotly.express as px
 import streamlit as st
-from sqlalchemy import create_engine
-
 from langchain_community.utilities import SQLDatabase
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.agent_toolkits import create_sql_agent
+import re
+import pandas as pd
+from sqlalchemy import create_engine
+import json
+import os
+import uuid
+
 
 # ==========================================
-# 0. KHỞI TẠO ĐƯỜNG DẪN & DATABASE SQLITE
+# 0. QUẢN LÝ LỊCH SỬ HỘI THOẠI (MULTI-SESSION NHƯ GEMINI)
 # ==========================================
-DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
-DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
+HISTORY_FILE = "chat_history.json"
 
-@st.cache_resource(show_spinner="Đang nạp 89.000+ đơn hàng từ CSV vào hệ thống... Vui lòng đợi!")
-def init_sqlite_db():
-    conn = sqlite3.connect("ecommerce.db", check_same_thread=False)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='df_orders'")
-    if cursor.fetchone()[0] == 0:
-        try:
-            read_opts = {'sep': None, 'engine': 'python', 'on_bad_lines': 'skip', 'encoding': 'utf-8'}
-            pd.read_csv("df_Customers.csv", **read_opts).drop_duplicates().to_sql('df_customers', conn, index=False, if_exists='replace')
-            pd.read_csv("df_Orders.csv", **read_opts).drop_duplicates().to_sql('df_orders', conn, index=False, if_exists='replace')
-            pd.read_csv("df_Payments.csv", **read_opts).drop_duplicates().to_sql('df_payments', conn, index=False, if_exists='replace')
-            pd.read_csv("df_Products.csv", **read_opts).drop_duplicates().to_sql('df_products', conn, index=False, if_exists='replace')
-            pd.read_csv("df_OrderItems.csv", **read_opts).drop_duplicates().to_sql('df_orderitems', conn, index=False, if_exists='replace')
-        except Exception as e:
-            st.error(f"Lỗi đọc file CSV: {e} - Hãy chắc chắn 5 file CSV đang nằm chung thư mục với app.py")
-    conn.close()
-    return True
 
-init_sqlite_db()
-
-# ==========================================
-# 1. QUẢN LÝ LỊCH SỬ HỘI THOẠI (MULTI-SESSION)
-# ==========================================
-HISTORY_FILE = "chat_history_v1.json"
-
-def load_chats():
+def load_history():
+    """Tải lịch sử chat. Hỗ trợ chuyển đổi nếu đang xài bản cũ (dạng List) sang bản mới (dạng Dict)"""
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except: return {}
+                data = json.load(f)
+                # Nếu file cũ là dạng List, tự động bọc nó vào một session mới để không bị lỗi
+                if isinstance(data, list):
+                    if len(data) > 0:
+                        return {str(uuid.uuid4()): data}
+                    return {}
+                return data
+        except:
+            return {}
     return {}
 
-def save_chats():
+
+def save_history(all_chats):
+    """Lưu toàn bộ các phiên chat vào file"""
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(st.session_state.chats, f, ensure_ascii=False, indent=4)
+        json.dump(all_chats, f, ensure_ascii=False, indent=4)
 
-def create_new_chat():
-    chat_id = str(uuid.uuid4())
-    st.session_state.chats[chat_id] = {"title": "New chat", "messages": []}
-    st.session_state.current_chat_id = chat_id
-    save_chats()
-
-def delete_chat(chat_id):
-    if chat_id in st.session_state.chats: del st.session_state.chats[chat_id]
-    if not st.session_state.chats: create_new_chat()
-    elif st.session_state.current_chat_id == chat_id:
-        st.session_state.current_chat_id = next(reversed(st.session_state.chats))
-    save_chats()
 
 def clear_all_history():
-    if os.path.exists(HISTORY_FILE): os.remove(HISTORY_FILE)
-    st.session_state.chats = {}
-    create_new_chat()
+    """Xóa trắng toàn bộ dữ liệu"""
+    if os.path.exists(HISTORY_FILE):
+        os.remove(HISTORY_FILE)
+    st.session_state.all_chats = {}
+    st.session_state.current_session_id = str(uuid.uuid4())
+    st.session_state.all_chats[st.session_state.current_session_id] = []
 
-if "chats" not in st.session_state:
-    st.session_state.chats = load_chats()
-
-if not st.session_state.chats: create_new_chat()
-elif "current_chat_id" not in st.session_state or st.session_state.current_chat_id not in st.session_state.chats:
-    st.session_state.current_chat_id = list(st.session_state.chats.keys())[-1]
-
-current_chat = st.session_state.chats[st.session_state.current_chat_id]
 
 # ==========================================
-# 2. CẤU HÌNH MAIN PAGE
+# 1. CẤU HÌNH GIAO DIỆN STREAMLIT
 # ==========================================
 st.set_page_config(page_title="My AI agent", page_icon="🛒", layout="wide")
 st.title("🛒 My AI agent")
 st.markdown("Trợ lý AI phân tích dữ liệu, săn Insight & Hoạch định Chiến lược")
-st.markdown("🔥 **Agent phát triển bởi: Group 3 - TINE313** 🔥")
+st.markdown("🔥 **Đồ án phát triển bởi: Group 3 - TINE313** 🔥")
+
+
+# Khởi tạo dữ liệu Multi-session
+if "all_chats" not in st.session_state:
+    st.session_state.all_chats = load_history()
+
+
+if "current_session_id" not in st.session_state:
+    # Nếu có lịch sử, chọn cái cuối cùng làm phiên hiện tại. Nếu không, tạo mới.
+    if st.session_state.all_chats:
+        st.session_state.current_session_id = list(st.session_state.all_chats.keys())[-1]
+    else:
+        new_id = str(uuid.uuid4())
+        st.session_state.current_session_id = new_id
+        st.session_state.all_chats[new_id] = []
+
 
 # ==========================================
-# 3. KHU VỰC SIDEBAR & CẤU HÌNH
+# 2. KHU VỰC CẤU HÌNH & SIDEBAR (CÓ CHUYỂN TAB CHAT)
 # ==========================================
 with st.sidebar:
     st.markdown("### 🔥 Group 3 - TINE313")
     st.markdown("---")
-    
+   
     col1, col2 = st.columns([1, 1])
     with col1:
+        # Bấm Chat Mới -> Tạo ID mới -> Lưu vào danh sách -> Làm mới màn hình
         if st.button("➕ Chat Mới", type="primary", use_container_width=True):
-            create_new_chat()
+            new_id = str(uuid.uuid4())
+            st.session_state.current_session_id = new_id
+            st.session_state.all_chats[new_id] = []
             st.rerun()
     with col2:
-        with st.popover("⚙️ Cấu hình", use_container_width=True):
-            st.text_input("Gemini API Key:", type="password", key="api_key")
-            st.markdown("[👉 Lấy API Key tại đây](https://aistudio.google.com/app/apikey)")
+        with st.popover("⚙️ Cấu hình"):
+            google_api_key = st.text_input("Gemini API Key:", type="password")
             st.markdown("---")
-            st.markdown("**Kết nối MySQL Workbench**")
-            st.caption("Để trống nếu dùng CSDL SQLite mặc định.")
-            st.text_input("Host (VD: localhost):", key="db_host")
-            st.text_input("Username (VD: root):", key="db_user")
-            st.text_input("Password:", type="password", key="db_pass")
-            st.text_input("Database Name:", key="db_name")
+            mysql_host = st.text_input("MySQL Host:", value="")
+            mysql_user = st.text_input("Username:", value="")
+            mysql_pass = st.text_input("Password:", type="password")
+            mysql_db = st.text_input("Database:", value="")
+
 
     st.markdown("---")
     st.markdown("📂 **Danh mục Bảng Dữ liệu**")
@@ -131,279 +108,261 @@ with st.sidebar:
         - **df_payments** (Thanh toán)
         """)
 
+
     st.markdown("---")
     st.markdown("🕒 **Lịch sử Hội thoại**")
-    
+   
     has_history = False
-    for chat_id, chat_data in reversed(list(st.session_state.chats.items())):
-        if len(chat_data.get("messages", [])) > 0:
+    # Duyệt ngược danh sách để các đoạn chat mới nhất lên đầu (như Gemini)
+    for session_id, chat_messages in reversed(st.session_state.all_chats.items()):
+        if len(chat_messages) > 0:
             has_history = True
-            cols = st.columns([0.82, 0.18])
-            is_current = (chat_id == st.session_state.current_chat_id)
-            title = chat_data.get("title", "New chat")
-            label = f"👉 {title}" if is_current else f"💬 {title}"
-            
-            with cols[0]:
-                if st.button(label, key=f"open_{chat_id}", use_container_width=True):
-                    st.session_state.current_chat_id = chat_id
-                    st.rerun()
-            with cols[1]:
-                if st.button("🗑️", key=f"delete_{chat_id}", help="Xóa chat này", use_container_width=True):
-                    delete_chat(chat_id)
-                    st.rerun()
-                    
-    if not has_history: st.info("Chưa có lịch sử trò chuyện.")
+            # Lấy câu hỏi đầu tiên làm Tiêu đề cho nút bấm
+            title = "Tin nhắn mới..."
+            for m in chat_messages:
+                if m["role"] == "user":
+                    title = m["content"][:22] + "..."
+                    break
+           
+            # Đổi icon để báo hiệu phiên chat nào đang được mở
+            is_active = (session_id == st.session_state.current_session_id)
+            btn_label = f"👉 {title}" if is_active else f"💬 {title}"
+           
+            # Nếu người dùng bấm vào lịch sử -> Đổi Session ID hiện tại -> Render lại màn hình
+            if st.button(btn_label, key=f"hist_{session_id}", use_container_width=True):
+                st.session_state.current_session_id = session_id
+                st.rerun()
+           
+    if not has_history:
+        st.info("Chưa có lịch sử trò chuyện.")
+
+
     if st.button("🗑️ Dọn dẹp TOÀN BỘ lịch sử", use_container_width=True):
         clear_all_history()
         st.rerun()
 
+
 # ==========================================
-# 4. BỘ NÃO CHIẾN LƯỢC & PROMPT (ĐÃ GIẢM TẢI)
+# 3. BỘ NÃO CHIẾN LƯỢC & ÉP KHUÔN ĐẦU RA
 # ==========================================
 instructions_raw = """
-Bạn là Giám đốc Chiến lược Dữ liệu (Chief Data Officer). Để tối ưu hiệu năng, hãy tuân thủ NGHIÊM NGẶT các quy tắc giảm tải sau:
-1. KIỂM TRA SƠ ĐỒ CSDL: BẮT BUỘC dùng tool kiểm tra tên cột thực tế trong bảng trước khi truy vấn. Tuyệt đối không tự đoán.
-2. CHỐNG TRÀN BỘ NHỚ: Luôn ưu tiên dùng các hàm tổng hợp (SUM, COUNT, AVG) hoặc BẮT BUỘC phải thêm `LIMIT 15` vào cuối câu lệnh SQL để giới hạn số lượng dòng trả về. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
-3. KHỬ TRÙNG LẶP: Dữ liệu thực tế thường bị nhân bản khi JOIN bảng. BẠN BẮT BUỘC phải dùng COUNT(DISTINCT cột_id) thay vì COUNT() thông thường.
-4. Trả lời cuối cùng BẮT BUỘC theo đúng cấu trúc sau (VIẾT NGẮN GỌN, SÚC TÍCH, KHÔNG DÀI DÒNG):
+# VAI TRÒ
+Bạn là Giám đốc Vận hành (COO) & Kỹ sư Dữ liệu cấp cao tại một E-commerce Marketplace.
 
+
+# BẢN ĐỒ CƠ SỞ DỮ LIỆU
+- df_orders: Bảng trung tâm. (order_id, customer_id, order_status).
+- df_customers: (customer_id, customer_city). Join với df_orders qua customer_id.
+- df_payments: (order_id, payment_value). Join với df_orders qua order_id.
+- df_products: (product_id, product_category_name).
+- df_orderitems: (order_id, product_id, price). Join df_orders qua order_id, df_products qua product_id.
+
+
+# QUY TRÌNH VẬN HÀNH BẮT BUỘC (SOP)
+1. TÌM KIẾM SỰ THẬT: BẠN BẮT BUỘC phải dùng công cụ sql_db_query để truy vấn CSDL. TUYỆT ĐỐI KHÔNG tự bịa số liệu.
+2. NỐI BẢNG: Luôn dùng df_orders làm trung tâm. Tính doanh thu bằng SUM(payment_value), loại trừ đơn Cancelled.
+
+
+# ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (FINAL ANSWER):
+Khi bạn đã có kết quả cuối cùng, bạn BẮT BUỘC phải bắt đầu bằng cụm từ "Final Answer: " sau đó mới đến các thẻ. Không được thiếu thẻ nào.
+
+
+Final Answer:
 [BIỂU ĐỒ]
-[CHART:loại_biểu_đồ|tên_cột_x|tên_cột_y|tiêu_đề]
+(BẮT BUỘC gộp toàn bộ code khai báo dữ liệu và vẽ biểu đồ vào DUY NHẤT 1 khối '''python. TUYỆT ĐỐI KHÔNG chia nhỏ thành nhiều khối!)
+'''python
+# code streamlit, matplotlib gom hết vào đây
+'''
+
 
 [PHÂN TÍCH]
-- Nêu đúng 2 insight kinh doanh cốt lõi nhất từ số liệu (tối đa 3 câu).
-- BẮT BUỘC chỉ ra một góc khuất hoặc điểm bất thường/trái logic từ dữ liệu.
+(Trình bày phân tích bằng Markdown sắc nét, chia làm 2 ý rõ ràng:
+1. Insight cơ bản: Đọc vị các con số tổng quan, xu hướng chính, phân bổ tỷ trọng bề nổi.
+2. Insight nghịch lý/chuyên sâu: Phát hiện điểm bất thường, rủi ro ngầm, hoặc cơ hội ẩn giấu đằng sau những con số đó.)
+
 
 [CHIẾN LƯỢC]
-Trình bày NGẮN GỌN 2 giải pháp cụ thể:
-- 1. Giải pháp thực thi: (1 câu)
-- 2. Dự báo tương lai: (1 câu lượng hóa, dựa trên đà tăng trưởng hiện tại nếu áp dụng giải pháp)
+(BẮT BUỘC trình bày bằng Bullet Points, chia thành 3 mục rõ ràng dựa trên insight:
+* Chiến lược Ngắn hạn (Cấp bách): ...
+* Chiến lược Trung hạn: ...
+* Chiến lược Dài hạn: ...)
+
 
 [SQL]
 '''sql
--- Dán câu lệnh SQL đã chạy thành công vào đây
+-- Dán câu lệnh SQL đã chạy thành công
 '''
 """
 instructions = instructions_raw.replace("'''", "```")
 
-def get_db_uri():
-    host = st.session_state.get("db_host", "")
-    user = st.session_state.get("db_user", "")
-    pwd = st.session_state.get("db_pass", "")
-    db_name = st.session_state.get("db_name", "")
-    if host and user and db_name:
-        pwd_part = f":{pwd}" if pwd else ""
-        return f"mysql+pymysql://{user}{pwd_part}@{host}:3306/{db_name}"
-    return DB_URI_SQLITE
 
+# ==========================================
+# 4. WORKFLOW KIỂM ĐỊNH DỮ LIỆU (DATA AUDIT - CODE CỨNG)
+# ==========================================
 def run_data_audit(db_uri):
     engine = create_engine(db_uri)
     audit_logs = []
     try:
-        df_pay = pd.read_sql("SELECT payment_value FROM df_payments WHERE payment_value < 0 LIMIT 1", engine)
-        if not df_pay.empty: audit_logs.append({"status": "error", "msg": "❌ df_payments: Phát hiện giao dịch giá trị âm."})
-        else: audit_logs.append({"status": "success", "msg": "✅ df_payments: 100% giao dịch có giá trị dương hợp lệ."})
-            
-        df_ord = pd.read_sql("SELECT order_id FROM df_orders WHERE order_status IS NULL LIMIT 1", engine)
-        if not df_ord.empty: audit_logs.append({"status": "warning", "msg": "⚠️ df_orders: Phát hiện đơn hàng bị trống trạng thái."})
-        else: audit_logs.append({"status": "success", "msg": "✅ df_orders: Toàn vẹn dữ liệu trạng thái đơn hàng."})
-    except Exception:
-        audit_logs.append({"status": "warning", "msg": "⚠️ Bỏ qua kiểm định sâu do CSDL chưa khởi tạo đầy đủ."})
+        df_pay = pd.read_sql("SELECT order_id, payment_value FROM df_payments WHERE payment_value < 0", engine)
+        if not df_pay.empty:
+            audit_logs.append({"status": "error", "msg": f"❌ df_payments: Phát hiện {len(df_pay)} giao dịch có giá trị âm (Lỗi hệ thống ghi nhận)."})
+        else:
+            audit_logs.append({"status": "success", "msg": "✅ df_payments: 100% giao dịch có giá trị dương hợp lệ."})
+           
+        df_ord = pd.read_sql("SELECT order_id FROM df_orders WHERE order_status IS NULL OR order_status = ''", engine)
+        if not df_ord.empty:
+            audit_logs.append({"status": "warning", "msg": f"⚠️ df_orders: Phát hiện {len(df_ord)} đơn hàng bị trống (Null) trạng thái."})
+        else:
+            audit_logs.append({"status": "success", "msg": "✅ df_orders: Toàn vẹn dữ liệu trạng thái đơn hàng."})
+           
+    except Exception as e:
+        audit_logs.append({"status": "warning", "msg": f"⚠️ Bỏ qua kiểm định sâu do CSDL chưa khởi tạo đầy đủ."})
+       
     return audit_logs
 
-def get_agent():
-    api_key = st.session_state.get("api_key", "")
-    if not api_key: return None, "Vui lòng nhập Gemini API Key trong mục ⚙️ Cấu hình."
-    try:
-        db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=3)
-        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
-        # GIẢM TẢI: Hạ max_iterations xuống 5 để Agent không bị lặp vô tận và quá tải
-        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=5)
-        return agent_executor, "OK"
-    except Exception as e: return None, str(e)
 
 # ==========================================
-# 5. RENDER RESPONSE (POWER BI STYLE CHARTING)
+# 5. KHỞI TẠO TÁC NHÂN
+# ==========================================
+def get_db_uri():
+    if mysql_host and mysql_user and mysql_db:
+        pwd_part = f":{mysql_pass}" if mysql_pass else ""
+        return f"mysql+pymysql://{mysql_user}{pwd_part}@{mysql_host}:3306/{mysql_db}"
+    return "sqlite:///ecommerce.db"
+
+
+def get_agent():
+    if not google_api_key:
+        return None, "Vui lòng nhập API Key trong mục Cấu hình."
+    try:
+        db_uri = get_db_uri()
+        db = SQLDatabase.from_uri(db_uri)
+        llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=google_api_key, temperature=0.1)
+       
+        agent_executor = create_sql_agent(
+            llm=llm,
+            toolkit=None,
+            db=db,
+            agent_type="zero-shot-react-description",
+            prefix=instructions,
+            verbose=True,
+            handle_parsing_errors=True,
+            max_iterations=15
+        )
+        return agent_executor, "OK"
+    except Exception as e:
+        return None, str(e)
+
+
+# ==========================================
+# 6. GIAO DIỆN HIỂN THỊ
 # ==========================================
 def render_assistant_response(answer, audit_logs=None):
-    answer = answer.strip()
-    
-    widget_key = hashlib.md5(answer.encode('utf-8')).hexdigest()[:10]
-    
-    sql_blocks = re.findall(r'```(?:sql)?\s*(.*?)\s*```', answer, re.DOTALL | re.IGNORECASE)
-    sql_to_run = sql_blocks[-1] if sql_blocks else None
+    answer = answer.replace("`", "") if answer.startswith("`") else answer
+   
+    code_blocks = re.findall(r'```python(.*?)```', answer, re.DOTALL)
+    sql_blocks = re.findall(r'```sql(.*?)```', answer, re.DOTALL)
+   
+    phan_tich = "Hệ thống đã phân tích xong nhưng đầu ra bị sai định dạng hiển thị. Vui lòng thử lại."
+    chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược. Vui lòng bấm 'Chat Mới' và hỏi lại."
+   
+    if "[PHÂN TÍCH]" in answer:
+        phan_tich = answer.split("[PHÂN TÍCH]")[1].split("[")[0].strip()
+       
+    if "[CHIẾN LƯỢC]" in answer:
+        chien_luoc = answer.split("[CHIẾN LƯỢC]")[1].split("[")[0].strip()
 
-    chart_spec = None
-    chart_match = re.search(r'\[CHART:(.*?)\]', answer, re.IGNORECASE)
-    if chart_match:
-        parts = chart_match.group(1).split('|')
-        if len(parts) >= 3:
-            chart_spec = {
-                "type": parts[0].strip().lower(),
-                "x": parts[1].strip().replace('\n', '').replace('\r', ''),
-                "y": parts[2].strip().replace('\n', '').replace('\r', ''),
-                "title": parts[3].strip().replace('\n', '') if len(parts) > 3 else "Biểu đồ Phân tích"
-            }
 
-    phan_tich = answer
-    chien_luoc = "Hệ thống chưa kịp hoàn thiện chiến lược."
+    if code_blocks:
+        combined_code = "\n".join(code_blocks)
+        try:
+            exec(combined_code)
+        except Exception as e:
+            st.warning(f"Không thể hiển thị biểu đồ: {e}")
 
-    pt_match = re.search(r'\[PHÂN TÍCH\](.*?)(\[CHIẾN LƯỢC\]|\[SQL\]|```|$)', answer, re.DOTALL | re.IGNORECASE)
-    if pt_match: phan_tich = pt_match.group(1).strip()
-
-    cl_match = re.search(r'\[CHIẾN LƯỢC\](.*?)(\[SQL\]|```|$)', answer, re.DOTALL | re.IGNORECASE)
-    if cl_match: chien_luoc = cl_match.group(1).strip()
-
-    if not pt_match:
-        phan_tich = re.sub(r'```.*?```', '', answer, flags=re.DOTALL)
-        phan_tich = re.sub(r'\[CHART:.*?\]', '', phan_tich, flags=re.IGNORECASE).replace("Final Answer:", "").strip()
 
     st.markdown("---")
-    st.markdown("💡 **Hệ thống AI đã bóc tách thành công Insight từ CSDL.**")
-    
+   
     if audit_logs:
         with st.expander("🔍 Biên bản Kiểm định Dữ liệu (Auto-Audit Workflow)", expanded=False):
             for log in audit_logs:
-                if log["status"] == "error": st.error(log["msg"])
-                elif log["status"] == "warning": st.warning(log["msg"])
-                else: st.success(log["msg"])
-
-    df_preview = None
-    if sql_to_run and "SELECT" in sql_to_run.upper():
-        try:
-            engine = create_engine(get_db_uri())
-            df_preview = pd.read_sql(sql_to_run, engine)
-        except Exception as e:
-            st.error(f"⚠️ Lỗi CSDL: {e}")
-
-    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Chiến lược & Dự báo", "⚙️ Tiến trình SQL"])
-    
-    with tab1:
-        if phan_tich: st.markdown(phan_tich)
-        else: st.info("Hệ thống chưa tìm thấy Insight đủ sâu cho câu hỏi này.")
-        
-        if df_preview is not None and not df_preview.empty:
-            st.markdown("---")
-            st.markdown("### 📊 Interactive Dashboard (Power BI Style)")
-            
-            default_type = "bar"
-            default_x = df_preview.columns[0]
-            default_y = df_preview.columns[-1] if len(df_preview.columns) > 1 else df_preview.columns[0]
-            default_title = "Data Visualization"
-            
-            if chart_spec:
-                default_type = chart_spec.get("type", "bar")
-                default_x = chart_spec.get("x", default_x)
-                default_y = chart_spec.get("y", default_y)
-                default_title = chart_spec.get("title", default_title)
-
-            if default_type not in ["bar", "line", "pie", "scatter", "area"]: default_type = "bar"
-            if default_x not in df_preview.columns: default_x = df_preview.columns[0]
-            if default_y not in df_preview.columns: default_y = df_preview.columns[-1]
-
-            viz_col, control_col = st.columns([3, 1])
-            
-            with control_col:
-                st.markdown("⚙️ **Visualizations Pane**")
-                chart_types = ["bar", "line", "pie", "scatter", "area"]
-                selected_type = st.selectbox("Loại biểu đồ", chart_types, index=chart_types.index(default_type), key=f"type_{widget_key}")
-                selected_x = st.selectbox("Trục X (Dimension)", df_preview.columns, index=list(df_preview.columns).index(default_x), key=f"x_{widget_key}")
-                selected_y = st.selectbox("Trục Y (Measure)", df_preview.columns, index=list(df_preview.columns).index(default_y), key=f"y_{widget_key}")
-                color_col_choice = st.selectbox("Phân loại (Legend)", ["None"] + list(df_preview.columns), key=f"color_{widget_key}")
-                show_trend = st.checkbox("📈 Bật đường dự báo (Trendline)", key=f"trend_{widget_key}")
-
-            with viz_col:
-                try:
-                    color_arg = None if color_col_choice == "None" else color_col_choice
-                    
-                    if selected_type == "scatter":
-                        if show_trend:
-                            try:
-                                fig = px.scatter(df_preview, x=selected_x, y=selected_y, color=color_arg, trendline="ols", title=default_title)
-                            except Exception:
-                                fig = px.scatter(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
-                                st.warning("⚠️ Cần cài đặt thư viện 'statsmodels' (pip install statsmodels) để vẽ đường xu hướng OLS.")
-                        else:
-                            fig = px.scatter(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
-                    elif selected_type == "bar":
-                        fig = px.bar(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
-                    elif selected_type == "line":
-                        fig = px.line(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
-                    elif selected_type == "pie":
-                        fig = px.pie(df_preview, names=selected_x, values=selected_y, title=default_title)
-                    elif selected_type == "area":
-                        fig = px.area(df_preview, x=selected_x, y=selected_y, color=color_arg, title=default_title)
-                    
-                    fig.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                    st.plotly_chart(fig, use_container_width=True)
-                except Exception as e:
-                    st.warning(f"⚠️ Dữ liệu không tương thích với loại biểu đồ này. Vui lòng đổi trục X/Y ở bảng điều khiển. (Lỗi: {e})")
-            
-    with tab2: st.markdown(chien_luoc)
-        
-    with tab3:
-        if sql_to_run:
-            st.markdown("**Câu lệnh SQL đã thực thi:**")
-            st.code(sql_to_run, language="sql")
-            if df_preview is not None:
-                st.markdown("**🗄️ Bảng kết quả (Data Preview):**")
-                st.dataframe(df_preview, use_container_width=True)
-        else: st.info("Không có tiến trình SQL nào được ghi nhận.")
-
-# Hiển thị Chat
-for msg in current_chat["messages"]:
-    if msg["role"] == "user":
-        with st.chat_message("user"): st.markdown(msg["content"])
+                if log["status"] == "error":
+                    st.error(log["msg"])
+                elif log["status"] == "warning":
+                    st.warning(log["msg"])
+                else:
+                    st.success(log["msg"])
     else:
-        with st.chat_message("assistant"): render_assistant_response(msg["content"])
+        st.success("✔️ **Dữ liệu đã được trích xuất an toàn từ CSDL Doanh Nghiệp**")
 
-# Xử lý Chat mới
-if prompt := st.chat_input("VD: Cho tôi insights về doanh thu và vẽ biểu đồ..."):
-    context_msgs = current_chat["messages"][-3:] if len(current_chat["messages"]) >= 3 else current_chat["messages"]
-    context_str = "\n".join([f"{m['role']}: {m['content']}" for m in context_msgs])
-    
-    full_prompt = f"Lịch sử trò chuyện gần đây:\n{context_str}\n\nCâu hỏi hiện tại: {prompt}" if context_str else prompt
-    
-    current_chat["messages"].append({"role": "user", "content": prompt})
-    save_chats()
-    
-    with st.chat_message("user"): st.markdown(prompt)
+
+    tab1, tab2, tab3 = st.tabs(["📊 Báo cáo Phân tích (Insight)", "💡 Đề xuất Chiến lược", "⚙️ Tiến trình SQL"])
+   
+    with tab1:
+        st.markdown(phan_tich if "[PHÂN TÍCH]" in answer else answer)
+           
+    with tab2:
+        st.markdown(chien_luoc)
+       
+    with tab3:
+        if sql_blocks:
+            st.markdown("**Câu lệnh SQL đã được Agent thực thi:**")
+            for sql in sql_blocks:
+                st.code(sql, language="sql")
+        else:
+            st.info("Agent đã sử dụng dữ liệu ngữ cảnh hoặc tiến trình bị ngắt.")
+
+
+# Hiển thị tin nhắn CỦA PHIÊN CHAT HIỆN TẠI
+current_messages = st.session_state.all_chats.get(st.session_state.current_session_id, [])
+
+
+for msg in current_messages:
+    if msg["role"] == "user":
+        with st.chat_message("user"):
+            st.markdown(msg["content"])
+    else:
+        with st.chat_message("assistant"):
+            render_assistant_response(msg["content"])
+
+
+if prompt := st.chat_input("VD: Phân tích top 10 sản phẩm..."):
+    # Thêm câu hỏi vào phiên hiện tại & LƯU LẠI
+    st.session_state.all_chats[st.session_state.current_session_id].append({"role": "user", "content": prompt})
+    save_history(st.session_state.all_chats)
+   
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
 
     agent, status = get_agent()
+   
     with st.chat_message("assistant"):
-        if agent is None: st.error(status)
+        if agent is None:
+            st.error(status)
         else:
             with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
                 current_audit = run_data_audit(get_db_uri())
-                
-            with st.spinner("Agent đang phân tích và dự báo (Chế độ tối ưu)..."):
+               
+            with st.spinner("Agent đang xử lý phân tích và tổng hợp Insight..."):
                 try:
-                    response = agent.invoke({"input": full_prompt})
+                    response = agent.invoke({"input": prompt})
                     answer = response["output"]
+                   
                     render_assistant_response(answer, current_audit)
-                    current_chat["messages"].append({"role": "assistant", "content": answer})
-                    
+                   
+                    # Thêm câu trả lời vào phiên & LƯU LẠI
+                    st.session_state.all_chats[st.session_state.current_session_id].append({"role": "assistant", "content": answer})
+                    save_history(st.session_state.all_chats)
+                   
                 except Exception as e:
                     error_str = str(e)
-                    full_traceback = traceback.format_exc()
-                    
-                    if "Could not parse LLM output:" in error_str:
+                    if "[PHÂN TÍCH]" in error_str or "[BIỂU ĐỒ]" in error_str:
                         extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
                         render_assistant_response(extracted_answer, current_audit)
-                        current_chat["messages"].append({"role": "assistant", "content": extracted_answer})
-                    elif "Agent stopped due to iteration limit or time limit" in error_str:
-                        err_msg = "⚠️ AI đã thử truy xuất dữ liệu nhiều lần nhưng liên tục gặp lỗi SQL nên phải tự động dừng. Hãy cung cấp câu hỏi chi tiết hơn hoặc kiểm tra lại tên cột thực tế!"
-                        st.error(err_msg)
-                        current_chat["messages"].append({"role": "assistant", "content": err_msg})
+                       
+                        st.session_state.all_chats[st.session_state.current_session_id].append({"role": "assistant", "content": extracted_answer})
+                        save_history(st.session_state.all_chats)
                     else:
-                        err_msg = f"**❌ HỆ THỐNG CRASH - CHI TIẾT LỖI DÀNH CHO DEV:**\n\n```python\n{full_traceback}\n```"
-                        st.error(err_msg)
-                        current_chat["messages"].append({"role": "assistant", "content": err_msg})
-                        
-        if current_chat.get("title") == "New chat":
-            clean_title = " ".join(prompt.strip().split())
-            if len(clean_title) > 34: clean_title = clean_title[:34] + "..."
-            current_chat["title"] = clean_title
-            
-        save_chats()
-        st.rerun()
+                        st.error(f"Đã có lỗi hệ thống xảy ra: {e}")
+
