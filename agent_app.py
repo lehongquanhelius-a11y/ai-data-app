@@ -158,27 +158,26 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 4. BỘ NÃO CHIẾN LƯỢC & PROMPT
+# 4. BỘ NÃO CHIẾN LƯỢC & PROMPT (ĐÃ GIẢM TẢI)
 # ==========================================
 instructions_raw = """
-Bạn là Giám đốc Chiến lược Dữ liệu (Chief Data Officer). 
-1. KIỂM TRA SƠ ĐỒ CSDL TRƯỚC: BẮT BUỘC dùng tool kiểm tra tên cột thực tế trong bảng trước khi truy vấn. Tuyệt đối không tự đoán tên cột.
-2. BẮT BUỘC dùng tool để chạy SQL lấy kết quả thực tế từ CSDL. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
-3. KHỬ TRÙNG LẶP: Dữ liệu thực tế thường bị nhân bản khi JOIN bảng. BẠN BẮT BUỘC phải dùng COUNT(DISTINCT cột_id) thay vì COUNT() thông thường (Ví dụ: COUNT(DISTINCT order_id)).
-4. Trả lời cuối cùng BẮT BUỘC phải theo đúng cấu trúc sau:
+Bạn là Giám đốc Chiến lược Dữ liệu (Chief Data Officer). Để tối ưu hiệu năng, hãy tuân thủ NGHIÊM NGẶT các quy tắc giảm tải sau:
+1. KIỂM TRA SƠ ĐỒ CSDL: BẮT BUỘC dùng tool kiểm tra tên cột thực tế trong bảng trước khi truy vấn. Tuyệt đối không tự đoán.
+2. CHỐNG TRÀN BỘ NHỚ: Luôn ưu tiên dùng các hàm tổng hợp (SUM, COUNT, AVG) hoặc BẮT BUỘC phải thêm `LIMIT 15` vào cuối câu lệnh SQL để giới hạn số lượng dòng trả về. KHÔNG ĐƯỢC TỰ BỊA SỐ LIỆU.
+3. KHỬ TRÙNG LẶP: Dữ liệu thực tế thường bị nhân bản khi JOIN bảng. BẠN BẮT BUỘC phải dùng COUNT(DISTINCT cột_id) thay vì COUNT() thông thường.
+4. Trả lời cuối cùng BẮT BUỘC theo đúng cấu trúc sau (VIẾT NGẮN GỌN, SÚC TÍCH, KHÔNG DÀI DÒNG):
 
 [BIỂU ĐỒ]
 [CHART:loại_biểu_đồ|tên_cột_x|tên_cột_y|tiêu_đề]
 
 [PHÂN TÍCH]
-TUYỆT ĐỐI KHÔNG liệt kê lại các dòng dữ liệu thô. Chỉ tập trung viết đúng 2 ý sau:
-- 1. Insight cơ bản: Đúc kết ngắn gọn xu hướng hoặc nguyên nhân cốt lõi từ số liệu.
-- 2. Insight nghịch lý/chuyên sâu: BẮT BUỘC chỉ ra một điểm bất thường, trái logic thông thường, hoặc một góc khuất ẩn sâu đằng sau số liệu. 
+- Nêu đúng 2 insight kinh doanh cốt lõi nhất từ số liệu (tối đa 3 câu).
+- BẮT BUỘC chỉ ra một góc khuất hoặc điểm bất thường/trái logic từ dữ liệu.
 
 [CHIẾN LƯỢC]
-Trình bày theo 2 phần rõ ràng:
-- 1. Giải pháp thực thi: Đề xuất 2-3 chiến thuật cụ thể để xử lý hoặc tận dụng "Insight nghịch lý" vừa tìm thấy.
-- 2. Dự báo tương lai: NẾU áp dụng các giải pháp trên, dự báo các chỉ số sẽ cải thiện như thế nào trong tương lai. Tính toán dựa trên số liệu thực tế đã truy xuất.
+Trình bày NGẮN GỌN 2 giải pháp cụ thể:
+- 1. Giải pháp thực thi: (1 câu)
+- 2. Dự báo tương lai: (1 câu lượng hóa, dựa trên đà tăng trưởng hiện tại nếu áp dụng giải pháp)
 
 [SQL]
 '''sql
@@ -218,7 +217,8 @@ def get_agent():
     try:
         db = SQLDatabase.from_uri(get_db_uri(), sample_rows_in_table_info=3)
         llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key, temperature=0.1)
-        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=8)
+        # GIẢM TẢI: Hạ max_iterations xuống 5 để Agent không bị lặp vô tận và quá tải
+        agent_executor = create_sql_agent(llm=llm, db=db, agent_type="zero-shot-react-description", prefix=instructions, verbose=True, handle_parsing_errors=True, max_iterations=5)
         return agent_executor, "OK"
     except Exception as e: return None, str(e)
 
@@ -376,7 +376,7 @@ if prompt := st.chat_input("VD: Cho tôi insights về doanh thu và vẽ biểu
             with st.spinner("Đang chạy luồng kiểm định chất lượng dữ liệu..."):
                 current_audit = run_data_audit(get_db_uri())
                 
-            with st.spinner("Agent đang phân tích và dự báo..."):
+            with st.spinner("Agent đang phân tích và dự báo (Chế độ tối ưu)..."):
                 try:
                     response = agent.invoke({"input": full_prompt})
                     answer = response["output"]
@@ -392,7 +392,7 @@ if prompt := st.chat_input("VD: Cho tôi insights về doanh thu và vẽ biểu
                         render_assistant_response(extracted_answer, current_audit)
                         current_chat["messages"].append({"role": "assistant", "content": extracted_answer})
                     elif "Agent stopped due to iteration limit or time limit" in error_str:
-                        err_msg = "⚠️ AI đã thử truy xuất dữ liệu nhiều lần nhưng liên tục gặp lỗi SQL nên phải tự động dừng để bảo vệ API. Hệ thống khuyên Sếp cung cấp tên cột cụ thể hơn hoặc kiểm tra lại tệp CSV gốc!"
+                        err_msg = "⚠️ AI đã thử truy xuất dữ liệu nhiều lần nhưng liên tục gặp lỗi SQL nên phải tự động dừng. Hãy cung cấp câu hỏi chi tiết hơn hoặc kiểm tra lại tên cột thực tế!"
                         st.error(err_msg)
                         current_chat["messages"].append({"role": "assistant", "content": err_msg})
                     else:
