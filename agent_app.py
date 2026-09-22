@@ -4,10 +4,15 @@ import json
 import sqlite3
 import uuid
 import hashlib
+import traceback
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 from sqlalchemy import create_engine
+
 from langchain_community.utilities import SQLDatabase
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.agent_toolkits import create_sql_agent
@@ -18,7 +23,7 @@ from langchain_community.agent_toolkits import create_sql_agent
 DB_PATH = os.path.abspath("ecommerce.db").replace('\\', '/')
 DB_URI_SQLITE = f"sqlite:///{DB_PATH}"
 
-@st.cache_resource(show_spinner="Đang nạp Data & Dọn dẹp rác Duplicate... Vui lòng đợi!")
+@st.cache_resource(show_spinner="Đang nạp 89.000+ đơn hàng từ CSV vào hệ thống... Vui lòng đợi!")
 def init_sqlite_db():
     conn = sqlite3.connect("ecommerce.db", check_same_thread=False)
     cursor = conn.cursor()
@@ -173,7 +178,7 @@ TUYỆT ĐỐI KHÔNG liệt kê lại các dòng dữ liệu thô. Chỉ tập 
 [CHIẾN LƯỢC]
 Trình bày theo 2 phần rõ ràng:
 - 1. Giải pháp thực thi: Đề xuất 2-3 chiến thuật cụ thể để xử lý hoặc tận dụng "Insight nghịch lý" vừa tìm thấy.
-- 2. Dự báo tương lai: NẾU áp dụng các giải pháp trên, dự báo các chỉ số sẽ cải thiện như thế nào trong tương lai.
+- 2. Dự báo tương lai: NẾU áp dụng các giải pháp trên, dự báo các chỉ số sẽ cải thiện như thế nào trong tương lai. Tính toán dựa trên số liệu thực tế đã truy xuất.
 
 [SQL]
 '''sql
@@ -380,6 +385,8 @@ if prompt := st.chat_input("VD: Cho tôi insights về doanh thu và vẽ biểu
                     
                 except Exception as e:
                     error_str = str(e)
+                    full_traceback = traceback.format_exc()
+                    
                     if "Could not parse LLM output:" in error_str:
                         extracted_answer = error_str.split("Could not parse LLM output:")[-1].strip()
                         render_assistant_response(extracted_answer, current_audit)
@@ -389,7 +396,9 @@ if prompt := st.chat_input("VD: Cho tôi insights về doanh thu và vẽ biểu
                         st.error(err_msg)
                         current_chat["messages"].append({"role": "assistant", "content": err_msg})
                     else:
-                        st.error(f"Đã có lỗi hệ thống xảy ra: {e}")
+                        err_msg = f"**❌ HỆ THỐNG CRASH - CHI TIẾT LỖI DÀNH CHO DEV:**\n\n```python\n{full_traceback}\n```"
+                        st.error(err_msg)
+                        current_chat["messages"].append({"role": "assistant", "content": err_msg})
                         
         if current_chat.get("title") == "New chat":
             clean_title = " ".join(prompt.strip().split())
