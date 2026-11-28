@@ -1,3 +1,8 @@
+# ==============================================================================
+# ĐÃ SỬA LỖI INDENTATIONERROR Ở DÒNG `if not new_code: break` VÀ CHUẨN HÓA TOÀN BỘ
+# INDENTATION (4 SPACES) ĐỂ COPY-PASTE LÊN GITHUB / STREAMLIT CLOUD KHÔNG BỊ LỖI.
+# ==============================================================================
+
 import datetime
 import io
 import math
@@ -43,8 +48,12 @@ FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
 def get_api_keys():
     raw_keys = st.session_state.get("custom_api_key", "").strip()
-    if not raw_keys and "GEMINI_API_KEY" in st.secrets:
-        raw_keys = st.secrets["GEMINI_API_KEY"]
+    if not raw_keys:
+        try:
+            if "GEMINI_API_KEY" in st.secrets:
+                raw_keys = st.secrets["GEMINI_API_KEY"]
+        except Exception:
+            raw_keys = ""
     return [k.strip() for k in raw_keys.split(",") if k.strip()]
 
 def ask_gemini(prompt: str) -> str:
@@ -210,32 +219,24 @@ def run_sandbox(code: str, raw_sheets: dict):
 def run_excel_agent(task: str, raw_sheets: dict, business_rules: str):
     schema_info = inspect_excel(raw_sheets)
 
-    coder_prompt = f"""
-Bạn là Chuyên gia Tự động hóa Dữ liệu Excel bằng Python Pandas.
-
-CẤU TRÚC & NỘI DUNG FILE EXCEL ĐẦU VÀO:
-{schema_info}
-
-QUY TẮC NGHIỆP VỤ BỔ SUNG:
-{business_rules}
-
-NHIỆM VỤ CỦA NGƯỜI DÙNG:
-{task}
-
-YÊU CẦU ĐẦU RA:
-1. Viết mục `## PLAN` nêu ngắn gọn các bước xử lý (ghi rõ nếu phát hiện đề bài nằm sẵn trong file Excel hoặc quy luật điền ô trống).
-2. Viết mục `## CODE` chứa 1 khối ```python ... ``` thực hiện nhiệm vụ.
-
-LUẬT VIẾT CODE & XỬ LÝ Ô TRỐNG (AUTO-FILL) BẮT BUỘC:
-- Biến `sheets` (dict[str, pd.DataFrame]) đã có sẵn, chứa toàn bộ các sheet của file Excel.
-- Không dùng `pd.read_excel()` hay `to_excel()`, không import `os`, `sys`. Chỉ dùng `pd`, `np`, `math`, `datetime`, `re`.
-- NẾU ĐỀ BÀI NẰM TRONG FILE EXCEL: Hãy đọc kỹ các text/ghi chú trong các sheet (như sheet Hướng dẫn, Yêu cầu, hoặc dòng ghi chú đầu/cuối bảng) để thực thi chính xác từng yêu cầu.
-- NẾU PHẢI ĐIỀN Ô TRỐNG (BLANK / NaN):
-  + Đối chiếu các dòng đã có sẵn dữ liệu với các dòng bị `NaN` để tìm ra quy luật (công thức tính toán giữa các cột, ánh xạ/VLOOKUP từ sheet danh mục sang sheet chính, phân loại điều kiện, hoặc nội suy dữ liệu thiếu).
-  + Giữ nguyên các giá trị hợp lệ đã có sẵn (trừ khi đề bài yêu cầu tính lại toàn bộ), chỉ điền vào các ô `NaN` / trống.
-- Lưu toàn bộ bảng kết quả vào dictionary `output_sheets` (ví dụ: `output_sheets = {{"Ket_qua": df_kq}}`).
-- Gán tóm tắt những gì đã làm và các con số nổi bật vào biến `analysis_note` (kiểu string).
-"""
+    coder_prompt = (
+        "Bạn là Chuyên gia Tự động hóa Dữ liệu Excel bằng Python Pandas.\n\n"
+        f"CẤU TRÚC & NỘI DUNG FILE EXCEL ĐẦU VÀO:\n{schema_info}\n\n"
+        f"QUY TẮC NGHIỆP VỤ BỔ SUNG:\n{business_rules}\n\n"
+        f"NHIỆM VỤ CỦA NGƯỜI DÙNG:\n{task}\n\n"
+        "YÊU CẦU ĐẦU RA:\n"
+        "1. Viết mục `## PLAN` nêu ngắn gọn các bước xử lý (ghi rõ nếu phát hiện đề bài nằm sẵn trong file Excel hoặc quy luật điền ô trống).\n"
+        "2. Viết mục `## CODE` chứa 1 khối ```python ... ``` thực hiện nhiệm vụ.\n\n"
+        "LUẬT VIẾT CODE & XỬ LÝ Ô TRỐNG (AUTO-FILL) BẮT BUỘC:\n"
+        "- Biến `sheets` (dict[str, pd.DataFrame]) đã có sẵn, chứa toàn bộ các sheet của file Excel.\n"
+        "- Không dùng `pd.read_excel()` hay `to_excel()`, không import `os`, `sys`. Chỉ dùng `pd`, `np`, `math`, `datetime`, `re`.\n"
+        "- NẾU ĐỀ BÀI NẰM TRONG FILE EXCEL: Hãy đọc kỹ các text/ghi chú trong các sheet (như sheet Hướng dẫn, Yêu cầu, hoặc dòng ghi chú đầu/cuối bảng) để thực thi chính xác từng yêu cầu.\n"
+        "- NẾU PHẢI ĐIỀN Ô TRỐNG (BLANK / NaN):\n"
+        "  + Đối chiếu các dòng đã có sẵn dữ liệu với các dòng bị `NaN` để tìm ra quy luật (công thức tính toán giữa các cột, ánh xạ/VLOOKUP từ sheet danh mục sang sheet chính, phân loại điều kiện, hoặc nội suy dữ liệu thiếu).\n"
+        "  + Giữ nguyên các giá trị hợp lệ đã có sẵn (trừ khi đề bài yêu cầu tính lại toàn bộ), chỉ điền vào các ô `NaN` / trống.\n"
+        '- Lưu toàn bộ bảng kết quả vào dictionary `output_sheets` (ví dụ: `output_sheets = {"Ket_qua": df_kq}`).\n'
+        "- Gán tóm tắt những gì đã làm và các con số nổi bật vào biến `analysis_note` (kiểu string)."
+    )
     raw_reply = ask_gemini(coder_prompt)
     plan = extract_plan(raw_reply)
     code = extract_python_code(raw_reply)
@@ -251,172 +252,164 @@ LUẬT VIẾT CODE & XỬ LÝ Ô TRỐNG (AUTO-FILL) BẮT BUỘC:
     attempt = 1
     while not success and attempt < 3:
         attempt += 1
-        fix_prompt = f"""
-Đoạn code Pandas sau bị lỗi khi chạy trên file Excel:
+        fix_prompt = (
+            "Đoạn code Pandas sau bị lỗi khi chạy trên file Excel:\n\n"
+            f"CẤU TRÚC EXCEL:\n{schema_info}\n\n"
+            f"NHIỆM VỤ:\n{task}\n\n"
+            f"CODE BỊ LỖI:\n```python\n{code}\n```\n\n"
+            f"THÔNG BÁO LỖI PYTHON:\n{err_msg}\n\n"
+            "Hãy sửa lại code cho chạy thành công 100%. Chỉ trả về duy nhất 1 khối ```python ... ``` và đảm bảo gán kết quả vào `output_sheets` và `analysis_note`."
+        )
+        fixed_reply = ask_gemini(fix_prompt)
+        new_code = extract_python_code(fixed_reply)
+        if not new_code:
+            break
+        code = new_code
+        success, out_sheets, note, err_msg = run_sandbox(code, raw_sheets)
+        trace.append({"attempt": attempt, "status": "OK" if success else "ERROR", "code": code, "error": err_msg})
 
-CẤU TRÚC EXCEL:
-{schema_info}
+    if not success:
+        return {
+            "error": True,
+            "message": f"Agent đã thử sửa {attempt} lần nhưng vẫn gặp lỗi thực thi:\n```\n{err_msg}\n```",
+            "trace": trace
+        }
 
-NHIỆM VỤ:
-{task}
+    # AGENT TỔNG HỢP BÁO CÁO
+    preview_out = "\n".join(
+        f"- Sheet '{k}' ({len(v)} dòng): {v.head(5).to_string(index=False)}"
+        for k, v in out_sheets.items()
+    )
+    reporter_prompt = (
+        f'Bạn là Trợ lý Phân tích Dữ liệu. Nhiệm vụ vừa chạy trên file dữ liệu: "{task}"\n'
+        f"Ghi chú từ hệ thống (`analysis_note`): {note}\n"
+        f"Bảng dữ liệu đầu ra (5 dòng đầu):\n{preview_out}\n\n"
+        "Hãy viết báo cáo ngắn gọn, rõ ràng bằng tiếng Việt:\n"
+        "1. Nêu rõ những gì đã phát hiện trong file (nếu có đề bài sẵn hoặc quy luật điền ô trống) và đã xử lý xong.\n"
+        "2. Nêu các con số/insight nổi bật rút ra được.\n"
+        "3. Nhắc người dùng xem bảng kết quả và bấm nút tải file Excel bên dưới."
+    )
+    summary = ask_gemini(reporter_prompt)
 
-CODE BỊ LỖI:
-```python
-{code}
-        THÔNG BÁO LỖI PYTHON:
-{err_msg}
-
-Hãy sửa lại code cho chạy thành công 100%. Chỉ trả về duy nhất 1 khối python ...  và đảm bảo gán kết quả vào output_sheets và analysis_note.
-"""
-fixed_reply = ask_gemini(fix_prompt)
-new_code = extract_python_code(fixed_reply)
-if not new_code:
-break
-code = new_code
-success, out_sheets, note, err_msg = run_sandbox(code, raw_sheets)
-trace.append({"attempt": attempt, "status": "OK" if success else "ERROR", "code": code, "error": err_msg})
-if not success:
     return {
-        "error": True,
-        "message": f"Agent đã thử sửa {attempt} lần nhưng vẫn gặp lỗi thực thi:\n```\n{err_msg}\n```",
+        "error": False,
+        "plan": plan,
+        "summary": summary,
+        "output_sheets": out_sheets,
+        "excel_bytes": to_excel_bytes(out_sheets),
         "trace": trace
     }
 
-# AGENT TỔNG HỢP BÁO CÁO
-preview_out = "\n".join(
-    f"- Sheet '{k}' ({len(v)} dòng): {v.head(5).to_string(index=False)}"
-    for k, v in out_sheets.items()
-)
-reporter_prompt = f"""
-Bạn là Trợ lý Phân tích Dữ liệu. Nhiệm vụ vừa chạy trên file dữ liệu: "{task}"
-Ghi chú từ hệ thống (analysis_note): {note}
-Bảng dữ liệu đầu ra (5 dòng đầu):
-{preview_out}
-
-Hãy viết báo cáo ngắn gọn, rõ ràng bằng tiếng Việt:
-
-Nêu rõ những gì đã phát hiện trong file (nếu có đề bài sẵn hoặc quy luật điền ô trống) và đã xử lý xong.
-
-Nêu các con số/insight nổi bật rút ra được.
-
-Nhắc người dùng xem bảng kết quả và bấm nút tải file Excel bên dưới.
-"""
-summary = ask_gemini(reporter_prompt)
-
-return {
-"error": False,
-"plan": plan,
-"summary": summary,
-"output_sheets": out_sheets,
-"excel_bytes": to_excel_bytes(out_sheets),
-"trace": trace
-}
-
-==========================================
-5. GIAO DIỆN STREAMLIT
-==========================================
+# ==========================================
+# 5. GIAO DIỆN STREAMLIT
+# ==========================================
 if "excel_messages" not in st.session_state:
-st.session_state.excel_messages = []
+    st.session_state.excel_messages = []
 
 with st.sidebar:
-st.markdown("### 📊 Excel AI Agent")
-st.caption("Powered by Google AI Studio (Gemini)")
-st.markdown("---")
-uploaded_excel = st.file_uploader("📂 1. Tải lên file Excel / CSV", type=["xlsx", "xls", "csv"])
+    st.markdown("### 📊 Excel AI Agent")
+    st.caption("Powered by Google AI Studio (Gemini)")
+    st.markdown("---")
 
-business_rules = st.text_area(
-    "🧠 2. Quy tắc nghiệp vụ (Tùy chọn)",
-    placeholder="VD: Cột Trang_thai = 'Hủy' thì không tính doanh thu...",
-    height=110
-)
+    uploaded_excel = st.file_uploader("📂 1. Tải lên file Excel / CSV", type=["xlsx", "xls", "csv"])
 
-with st.expander("🔑 Cấu hình API Key dự phòng"):
-    st.text_input(
-        "Google AI Studio API Key",
-        type="password",
-        key="custom_api_key",
-        placeholder="AIzaSy... (Để trống nếu đã cài trong Secrets)"
+    business_rules = st.text_area(
+        "🧠 2. Quy tắc nghiệp vụ (Tùy chọn)",
+        placeholder="VD: Cột Trang_thai = 'Hủy' thì không tính doanh thu...",
+        height=110
     )
 
-if st.button("🗑️ Xóa lịch sử chat", use_container_width=True):
-    st.session_state.excel_messages = []
-    st.rerun()
-    st.title("📊 Trợ lý AI Xử lý & Phân tích Excel")
+    with st.expander("🔑 Cấu hình API Key dự phòng"):
+        st.text_input(
+            "Google AI Studio API Key",
+            type="password",
+            key="custom_api_key",
+            placeholder="AIzaSy... (Để trống nếu đã cài trong Secrets)"
+        )
+
+    if st.button("🗑️ Xóa lịch sử chat", use_container_width=True):
+        st.session_state.excel_messages = []
+        st.rerun()
+
+st.title("📊 Trợ lý AI Xử lý & Phân tích Excel")
 
 if not uploaded_excel:
-st.info("👈 Hãy tải lên một file Excel (.xlsx, .xls) hoặc CSV ở thanh bên trái để bắt đầu giao việc cho AI.")
-st.stop()
+    st.info("👈 Hãy tải lên một file Excel (.xlsx, .xls) hoặc CSV ở thanh bên trái để bắt đầu giao việc cho AI.")
+    st.stop()
 
 raw_sheets = load_spreadsheet_sheets(uploaded_excel.getvalue(), uploaded_excel.name)
 
-with st.expander(f"👀 Xem nhanh dữ liệu gốc: {uploaded_excel.name} ({len(raw_sheets)} sheet)", expanded=False):
-tabs = st.tabs(list(raw_sheets.keys()))
-for tab, (s_name, s_df) in zip(tabs, raw_sheets.items()):
-with tab:
-st.caption(f"Kích thước: {len(s_df)} dòng × {len(s_df.columns)} cột | Ô trống (NaN): {int(s_df.isna().sum().sum())}")
-st.dataframe(s_df.head(50), use_container_width=True, hide_index=True)
+with st.expander(f"👀 Xem nhanh dữ liệu gốc: `{uploaded_excel.name}` ({len(raw_sheets)} sheet)", expanded=False):
+    tabs = st.tabs(list(raw_sheets.keys()))
+    for tab, (s_name, s_df) in zip(tabs, raw_sheets.items()):
+        with tab:
+            st.caption(f"Kích thước: {len(s_df)} dòng × {len(s_df.columns)} cột | Ô trống (NaN): {int(s_df.isna().sum().sum())}")
+            st.dataframe(s_df.head(50), use_container_width=True, hide_index=True)
 
-Hiển thị lịch sử hội thoại
+# Hiển thị lịch sử hội thoại
 for idx, msg in enumerate(st.session_state.excel_messages):
-with st.chat_message(msg["role"]):
-if msg["role"] == "user":
-st.markdown(msg["content"])
-else:
-res = msg["result"]
-if res.get("error"):
-st.error(res["message"])
-else:
-st.markdown(res["summary"])
-st.download_button(
-label="📥 Tải file Excel kết quả (.xlsx)",
-data=res["excel_bytes"],
-file_name=f"AI_Processed_{uploaded_excel.name.rsplit('.', 1)[0]}.xlsx",
-mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-key=f"dl_btn_{idx}",
-type="primary"
-)
-out_sheets = res["output_sheets"]
-out_tabs = st.tabs([f"📄 {k}" for k in out_sheets.keys()])
-for t, (k, df_out) in zip(out_tabs, out_sheets.items()):
-with t:
-st.caption(f"{len(df_out)} dòng × {len(df_out.columns)} cột")
-st.dataframe(df_out.head(100), use_container_width=True, hide_index=True)
-if res.get("trace"):
-            with st.expander("⚙️ Xem kế hoạch & Code Python Agent đã chạy"):
-                if res.get("plan"):
-                    st.markdown(f"**Kế hoạch:**\n{res['plan']}")
-                for step in res["trace"]:
-                    st.caption(f"Lần chạy #{step['attempt']} — Trạng thái: {step['status']}")
-                    st.code(step["code"], language="python")
-                    if step["error"]:
-                        st.error(step["error"])
-                        NÚT CHẠY TỰ ĐỘNG (KHÔNG CẦN GÕ LỆNH) + KHUNG NHẬP THỦ CÔNG
+    with st.chat_message(msg["role"]):
+        if msg["role"] == "user":
+            st.markdown(msg["content"])
+        else:
+            res = msg["result"]
+            if res.get("error"):
+                st.error(res["message"])
+            else:
+                st.markdown(res["summary"])
+                st.download_button(
+                    label="📥 Tải file Excel kết quả (.xlsx)",
+                    data=res["excel_bytes"],
+                    file_name=f"AI_Processed_{uploaded_excel.name.rsplit('.', 1)[0]}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_btn_{idx}",
+                    type="primary"
+                )
+                out_sheets = res["output_sheets"]
+                out_tabs = st.tabs([f"📄 {k}" for k in out_sheets.keys()])
+                for t, (k, df_out) in zip(out_tabs, out_sheets.items()):
+                    with t:
+                        st.caption(f"{len(df_out)} dòng × {len(df_out.columns)} cột")
+                        st.dataframe(df_out.head(100), use_container_width=True, hide_index=True)
+
+            if res.get("trace"):
+                with st.expander("⚙️ Xem kế hoạch & Code Python Agent đã chạy"):
+                    if res.get("plan"):
+                        st.markdown(f"**Kế hoạch:**\n{res['plan']}")
+                    for step in res["trace"]:
+                        st.caption(f"Lần chạy #{step['attempt']} — Trạng thái: {step['status']}")
+                        st.code(step["code"], language="python")
+                        if step["error"]:
+                            st.error(step["error"])
+
+# NÚT CHẠY TỰ ĐỘNG (KHÔNG CẦN GÕ LỆNH) + KHUNG NHẬP THỦ CÔNG
 auto_run = st.button(
-"⚡ Tự động đọc đề bài trong file & Điền ô trống (Không cần nhập lệnh)",
-type="primary",
-use_container_width=True
+    "⚡ Tự động đọc đề bài trong file & Điền ô trống (Không cần nhập lệnh)",
+    type="primary",
+    use_container_width=True
 )
 manual_input = st.chat_input("Hoặc nhập yêu cầu cụ thể tại đây...")
 
 task_input = None
 if auto_run:
-task_input = (
-"⚡ [CHẾ ĐỘ TỰ ĐỘNG]: Hãy quét toàn bộ các sheet trong file Excel này: "
-"(1) Tìm xem có đề bài, hướng dẫn hoặc yêu cầu nào được ghi sẵn bên trong file Excel không để thực hiện; "
-"(2) Xác định tất cả các cột/ô đang bị bỏ trống (Blank / NaN), tự suy luận quy luật tính toán hoặc ánh xạ từ các dòng mẫu/sheet tham chiếu để điền đầy đủ vào các ô trống đó."
-)
+    task_input = (
+        "⚡ [CHẾ ĐỘ TỰ ĐỘNG]: Hãy quét toàn bộ các sheet trong file Excel này: "
+        "(1) Tìm xem có đề bài, hướng dẫn hoặc yêu cầu nào được ghi sẵn bên trong file Excel không để thực hiện; "
+        "(2) Xác định tất cả các cột/ô đang bị bỏ trống (Blank / NaN), tự suy luận quy luật tính toán hoặc ánh xạ từ các dòng mẫu/sheet tham chiếu để điền đầy đủ vào các ô trống đó."
+    )
 elif manual_input:
-task_input = manual_input
+    task_input = manual_input
 
 if task_input:
-st.session_state.excel_messages.append({"role": "user", "content": task_input})
-with st.chat_message("user"):
-st.markdown(task_input)
-with st.spinner("🤖 Agent đang quét đề bài, suy luận quy luật điền ô trống và kiểm thử code..."):
-    try:
-        result = run_excel_agent(task_input, raw_sheets, business_rules)
-    except Exception as e:
-        result = {"error": True, "message": f"Lỗi kết nối Google AI Studio: {e}"}
+    st.session_state.excel_messages.append({"role": "user", "content": task_input})
+    with st.chat_message("user"):
+        st.markdown(task_input)
 
-st.session_state.excel_messages.append({"role": "assistant", "result": result})
-st.rerun()
+    with st.spinner("🤖 Agent đang quét đề bài, suy luận quy luật điền ô trống và kiểm thử code..."):
+        try:
+            result = run_excel_agent(task_input, raw_sheets, business_rules)
+        except Exception as e:
+            result = {"error": True, "message": f"Lỗi kết nối Google AI Studio: {e}"}
+
+    st.session_state.excel_messages.append({"role": "assistant", "result": result})
+    st.rerun()
