@@ -1,5 +1,5 @@
 # ==============================================================================
-# SELF-LEARNING EXCEL AI AGENT (ĐÃ VÁ LỖI STRICT STRING DTYPE TRÊN PANDAS MỚI)
+# SELF-LEARNING EXCEL AI AGENT (ĐÃ VÁ LỖI PANDAS 3.0 KHI XUẤT EXCEL & STRICT STR)
 # - File requirements.txt: streamlit, google-genai, pandas, numpy, openpyxl, xlrd
 # - Streamlit Secrets: GEMINI_API_KEY = "AIzaSy_KEY_1, AIzaSy_KEY_2"
 # ==============================================================================
@@ -130,14 +130,14 @@ def format_memory_context(task: str, raw_sheets: dict, mem: dict) -> str:
 # ==========================================
 # 3. KẾT NỐI GOOGLE AI STUDIO (XOAY VÒNG KEY)
 # ==========================================
-FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.6-flash-lite"]
+FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
 def get_api_keys():
-    raw_keys = st.session_state.get("custom_api_key", "").strip()
+    raw_keys = str(st.session_state.get("custom_api_key", "")).strip()
     if not raw_keys:
         try:
             if "GEMINI_API_KEY" in st.secrets:
-                raw_keys = st.secrets["GEMINI_API_KEY"]
+                raw_keys = str(st.secrets["GEMINI_API_KEY"])
         except Exception:
             raw_keys = ""
     return [k.strip() for k in raw_keys.split(",") if k.strip()]
@@ -162,8 +162,8 @@ def ask_gemini(prompt: str) -> str:
                 err_str = str(e).lower()
                 if any(tok in err_str for tok in ["429", "quota", "rate", "resource_exhausted"]):
                     continue
-                raise e
-    raise last_err
+                raise RuntimeError(f"Lỗi API Google AI Studio: {e}") from e
+    raise RuntimeError(f"Tất cả API Key đều chạm giới hạn quota: {last_err}") from last_err
 
 def learn_from_run(task: str, raw_sheets: dict, final_code: str, trace: list, mem: dict) -> str:
     learned_lesson = ""
@@ -240,6 +240,13 @@ def inspect_excel(sheets: dict) -> str:
         )
     return "\n".join(lines)
 
+def _safe_cell_len(val) -> int:
+    if val is None or val is pd.NA:
+        return 0
+    if isinstance(val, float) and math.isnan(val):
+        return 0
+    return len(str(val))
+
 def to_excel_bytes(sheets_dict: dict) -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -248,10 +255,9 @@ def to_excel_bytes(sheets_dict: dict) -> bytes:
             df.to_excel(writer, sheet_name=safe_name, index=False)
             worksheet = writer.sheets[safe_name]
             for idx, col in enumerate(df.columns, 1):
-                max_len = max(
-                    df[col].astype(str).map(len).max() if not df.empty else 0,
-                    len(str(col))
-                ) + 4
+                series = df.iloc[:, idx - 1]
+                max_cell_len = int(series.map(_safe_cell_len).max()) if not df.empty else 0
+                max_len = max(max_cell_len, len(str(col))) + 4
                 col_letter = worksheet.cell(row=1, column=idx).column_letter
                 worksheet.column_dimensions[col_letter].width = min(max_len, 45)
     return output.getvalue()
@@ -312,7 +318,6 @@ def run_sandbox(code: str, raw_sheets: dict):
         "__builtins__": safe_builtins,
     }
 
-    # Mở khóa các cột kiểu strict string (ArrowStringArray) sang object để tránh TypeError khi gán số/NaN
     clean_sheets = {}
     for k, v in raw_sheets.items():
         df_copy = v.copy()
@@ -603,7 +608,7 @@ if task_input:
         try:
             result = run_excel_agent(task_input, raw_sheets, business_rules, memory)
         except Exception as e:
-            result = {"error": True, "message": f"Lỗi kết nối Google AI Studio: {e}"}
+            result = {"error": True, "message": f"{e}"}
 
     st.session_state.excel_messages.append({"role": "assistant", "result": result})
     st.rerun()
