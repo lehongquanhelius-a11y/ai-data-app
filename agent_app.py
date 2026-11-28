@@ -1,5 +1,5 @@
 # ==============================================================================
-# EXCEL AI AGENT (PHIÊN BẢN CÓ BỘ NHỚ TỰ HỌC LONG-TERM MEMORY)
+# SELF-LEARNING EXCEL AI AGENT (ĐÃ VÁ LỖI STRICT STRING DTYPE TRÊN PANDAS MỚI)
 # - File requirements.txt: streamlit, google-genai, pandas, numpy, openpyxl, xlrd
 # - Streamlit Secrets: GEMINI_API_KEY = "AIzaSy_KEY_1, AIzaSy_KEY_2"
 # ==============================================================================
@@ -130,7 +130,7 @@ def format_memory_context(task: str, raw_sheets: dict, mem: dict) -> str:
 # ==========================================
 # 3. KẾT NỐI GOOGLE AI STUDIO (XOAY VÒNG KEY)
 # ==========================================
-FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.6-flash-lite"]
+FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
 def get_api_keys():
     raw_keys = st.session_state.get("custom_api_key", "").strip()
@@ -168,7 +168,6 @@ def ask_gemini(prompt: str) -> str:
 def learn_from_run(task: str, raw_sheets: dict, final_code: str, trace: list, mem: dict) -> str:
     learned_lesson = ""
 
-    # 1. Nếu lần 1 bị lỗi và các lần sau sửa được -> Tự đúc kết bài học kinh nghiệm
     if len(trace) > 1 and trace[0]["status"] == "ERROR":
         first_err = trace[0]["error"]
         reflect_prompt = (
@@ -187,7 +186,6 @@ def learn_from_run(task: str, raw_sheets: dict, final_code: str, trace: list, me
         except Exception:
             pass
 
-    # 2. Lưu code thành công vào kho văn mẫu (Dynamic Few-Shot)
     all_cols = []
     for df in raw_sheets.values():
         all_cols.extend(str(c) for c in df.columns)
@@ -313,8 +311,18 @@ def run_sandbox(code: str, raw_sheets: dict):
         "re": re,
         "__builtins__": safe_builtins,
     }
+
+    # Mở khóa các cột kiểu strict string (ArrowStringArray) sang object để tránh TypeError khi gán số/NaN
+    clean_sheets = {}
+    for k, v in raw_sheets.items():
+        df_copy = v.copy()
+        for col in df_copy.columns:
+            if pd.api.types.is_string_dtype(df_copy[col]) or df_copy[col].dtype.name in ("string", "str"):
+                df_copy[col] = df_copy[col].astype(object)
+        clean_sheets[k] = df_copy
+
     local_vars = {
-        "sheets": {k: v.copy() for k, v in raw_sheets.items()},
+        "sheets": clean_sheets,
         "output_sheets": {},
         "analysis_note": ""
     }
@@ -357,6 +365,7 @@ def run_excel_agent(task: str, raw_sheets: dict, business_rules: str, mem: dict)
         "LUẬT VIẾT CODE & XỬ LÝ Ô TRỐNG (AUTO-FILL) BẮT BUỘC:\n"
         "- Biến `sheets` (dict[str, pd.DataFrame]) đã có sẵn, chứa toàn bộ các sheet của file Excel.\n"
         "- Không dùng `pd.read_excel()` hay `to_excel()`, không import `os`, `sys`. Chỉ dùng `pd`, `np`, `math`, `datetime`, `re`.\n"
+        "- Pandas đang dùng chế độ strict string dtype: trước khi gán số (int/float) hoặc tính toán trên một cột đang có kiểu `str`/`object`, bắt buộc chuyển cột đó về số bằng `pd.to_numeric(df[col], errors='coerce')` hoặc ép kiểu `df[col] = df[col].astype(object)`.\n"
         "- NẾU ĐỀ BÀI NẰM TRONG FILE EXCEL: Hãy đọc kỹ các text/ghi chú trong các sheet (như sheet Hướng dẫn, Yêu cầu, hoặc dòng ghi chú đầu/cuối bảng) để thực thi chính xác từng yêu cầu.\n"
         "- NẾU PHẢI ĐIỀN Ô TRỐNG (BLANK / NaN):\n"
         "  + Đối chiếu các dòng đã có sẵn dữ liệu với các dòng bị `NaN` để tìm ra quy luật (công thức tính toán giữa các cột, ánh xạ/VLOOKUP từ sheet danh mục sang sheet chính, phân loại điều kiện, hoặc nội suy dữ liệu thiếu).\n"
@@ -385,6 +394,7 @@ def run_excel_agent(task: str, raw_sheets: dict, business_rules: str, mem: dict)
             f"NHIỆM VỤ:\n{task}\n\n"
             f"CODE BỊ LỖI:\n```python\n{code}\n```\n\n"
             f"THÔNG BÁO LỖI PYTHON:\n{err_msg}\n\n"
+            "LƯU Ý QUAN TRỌNG: Pandas đang bật strict string dtype — nếu lỗi liên quan đến `TypeError` khi gán số vào cột `str`, hãy dùng `pd.to_numeric(df[col], errors='coerce')` hoặc `df[col] = df[col].astype(object)` trước khi gán.\n"
             "Hãy sửa lại code cho chạy thành công 100%. Chỉ trả về duy nhất 1 khối ```python ... ``` và đảm bảo gán kết quả vào `output_sheets` và `analysis_note`."
         )
         fixed_reply = ask_gemini(fix_prompt)
