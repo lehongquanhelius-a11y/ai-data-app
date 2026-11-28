@@ -1,12 +1,6 @@
 streamlit
-langchain
-langchain-community
-langchain-google-genai
-SQLAlchemy
-pymysql
+google-genai
 pandas
-matplotlib
-seaborn
-langchain-groq
-groq
-plotly
+numpy
+openpyxl
+xlrd
