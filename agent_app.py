@@ -130,7 +130,7 @@ def format_memory_context(task: str, raw_sheets: dict, mem: dict) -> str:
 # ==========================================
 # 3. KẾT NỐI GOOGLE AI STUDIO (XOAY VÒNG KEY)
 # ==========================================
-FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.6-flash-lite"]
 
 def get_api_keys():
     raw_keys = st.session_state.get("custom_api_key", "").strip()
